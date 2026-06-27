@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Secrets / local env
+.env
+*.key
+
+# HE generated artifacts (ciphertexts, contexts, results)
+he_shared/
+
+# Editor / OS
+.DS_Store
+.claude/
+.idea/
+.vscode/

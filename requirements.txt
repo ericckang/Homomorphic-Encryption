@@ -1,0 +1,14 @@
+# Core homomorphic-encryption engine
+tenseal==0.3.16
+numpy>=1.24            # required by TenSEAL
+
+# Server: control-plane REST API (server.py)
+fastapi==0.138.1
+uvicorn==0.49.0
+pydantic==2.13.4
+
+# Agent: client that calls the server (agent.py)
+requests>=2.31
+
+# Chat client (chat_agent.py) — Azure OpenAI
+openai>=1.0
