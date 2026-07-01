@@ -11,7 +11,7 @@ Empirically locates the three operating limits of the encrypted-compute pipeline
      exceeding the chain throws "scale out of bounds". This is the binding limit
      for useful computation.
 
-Run:  python benchmark_boundary.py    (no server required)
+Run:  python scripts/benchmark_boundary.py    (no server required)
 """
 import tenseal as ts
 import gc

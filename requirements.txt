@@ -10,5 +10,5 @@ pydantic==2.13.4
 # Agent: client that calls the server (agent.py)
 requests>=2.31
 
-# Chat client (chat_agent.py) — Azure OpenAI
+# Agent planner (agent_side/planner.py) - Azure OpenAI
 openai>=1.0

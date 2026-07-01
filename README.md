@@ -11,22 +11,39 @@ This repo is the server/transport + compute half of a larger
 
 | Component | File | Role |
 |-----------|------|------|
-| **Blind-evaluator server** | `server.py` | Untrusted FastAPI compute node. Operates entirely on ciphertext; holds no secret key and refuses any context that carries one. Plugin-based: each scenario is one isolated class. |
-| **Agent / client** | `agent.py` | Trusted client. Generates keys, encrypts the input, calls the server, and is the only party that can decrypt the result. Includes benchmark scenarios. |
-| **Chat client** | `chat_agent.py` | Standalone Azure OpenAI chat loop (LLM-orchestration prototype). |
+| **Agent / client** | `agent.py`, `agent_side/` | Trusted data-owner side. Uses Azure OpenAI to plan an HE operation schema from a task prompt, generates keys, encrypts input data locally, calls the server, and is the only party that can decrypt the result. |
+| **Blind-evaluator server** | `server.py`, `server_side/` | Untrusted FastAPI compute node. Operates entirely on ciphertext; holds no secret key, refuses any context that carries one, and runs only the generic BFV/CKKS operation schema. |
+| **Shared definitions** | `he_common/` | Non-sensitive config and operation schema validation shared by both sides. |
+
+### File layout
+
+```text
+agent.py                 # thin entrypoint for the trusted data-owner agent
+server.py                # thin entrypoint for the untrusted compute service
+agent_side/              # input parsing, LLM planning, encryption, transport, reporting
+server_side/             # FastAPI app, security checks, generic HE operations
+he_common/               # shared config and operation-plan helpers
+data/sample_data.csv     # example CSV input
+scripts/smoke_test.py    # end-to-end test with fixed operation schemas
+scripts/benchmark_boundary.py
+```
 
 **Two planes:**
 - **Control plane** — lightweight JSON instructions over REST (`computation_type`, paths, params).
 - **Data plane** — heavy binary blobs (the public crypto context + ciphertext payloads)
   exchanged via a shared directory (`./he_shared`), bypassing HTTP body-size limits.
 
-### Compute scenarios (server plugins)
+### Generic Compute Capability
 
-| `computation_type` | Scheme | Operation |
-|--------------------|--------|-----------|
-| `salary_benchmark` | BFV (exact integers) | element-wise `(x - median) * scale` |
-| `medical_risk` | CKKS (approx. reals) | depth-3 polynomial `x^8 + x^4 + x^2` |
-| `ckks_error_scaling` | CKKS | iterative squaring, one ciphertext per depth (charts error vs. multiplicative depth) |
+The server does not contain scenario-specific code for salary, medical,
+financial, energy, or other domains. New scenarios are handled by the LLM
+planner producing a bounded operation schema that the generic server pipeline
+can execute.
+
+| Scheme | Operation style |
+|--------|-----------------|
+| `BFV` | exact integer element-wise pipelines |
+| `CKKS` | approximate real-number element-wise pipelines, including bounded polynomials |
 
 ## Setup
 
@@ -49,16 +66,79 @@ python server.py
 # serves http://127.0.0.1:8080  (docs at /docs)
 ```
 On boot it logs `This node holds NO secret key and cannot decrypt any payload.`
-and registers the three plugins.
+and enables generic BFV/CKKS compute.
 
-**Terminal 2 — the client / benchmark suite:**
+**Terminal 2 — the client / generalized HE agent:**
 ```bash
+export AZURE_OPENAI_KEY="<your-key>"
 python agent.py
-# enter a batch size when prompted (e.g. 100, 4000)
 ```
-The agent runs all three scenarios and prints benchmark reports. Watch the **server**
-terminal: every request logs a `BLIND-EVAL` line with the ciphertext size and a hex
-preview — the proof that the server only ever sees gibberish.
+The agent asks for a natural-language task prompt. You can include data inline:
+
+```text
+Compare each salary to 90000 and double the difference. data=[85000, 90000, 95000]
+```
+
+Or leave the data out and provide a CSV path when prompted:
+
+```text
+Compute a nonlinear medical risk score using x^8 + x^4 + x^2.
+```
+
+CSV format is one numeric vector in a `value` column:
+
+```csv
+value
+85000
+90000
+95000
+```
+
+See `data/sample_data.csv` for a ready-to-run example.
+
+The LLM receives only the task text with raw data redacted plus basic metadata
+like vector length and integer-vs-float type. It returns a JSON operation schema
+using a bounded DSL (`add_scalar`, `sub_scalar`, `mul_scalar`, `square`,
+`polynomial`). The agent encrypts locally, sends the schema plus ciphertext to
+the compute service, decrypts the returned ciphertext, and prints result samples,
+performance, and CKKS approximation error when applicable. Watch the **server**
+terminal: every request logs a `BLIND-EVAL` line with the ciphertext size and a
+hex preview — the proof that the server only ever sees gibberish.
+
+Before encryption, the agent runs preflight checks for unsupported tasks,
+excessive multiplication depth, large input vectors, and estimated payload size.
+Unsupported requests such as sorting, median, min/max, boolean comparison,
+branching, encrypted division, and general classifiers are rejected early with a
+clear explanation.
+
+## Testing
+
+Run a syntax check:
+
+```bash
+python -m compileall agent.py server.py agent_side server_side he_common scripts
+```
+
+Run the end-to-end smoke test without an Azure OpenAI key:
+
+```bash
+# Terminal 1
+python server.py
+
+# Terminal 2
+python scripts/smoke_test.py
+```
+
+The smoke test sends fixed BFV and CKKS operation schemas directly to the
+server. It verifies exact BFV decryption and bounded CKKS approximation error.
+
+Run the HE boundary benchmark:
+
+```bash
+python scripts/benchmark_boundary.py
+```
+
+See `SPEC.md` for the full architecture, privacy model, and testing notes.
 
 ### Configuration
 
@@ -70,19 +150,10 @@ The server reads optional environment variables (all have defaults):
 | `HE_HOST` / `HE_PORT` | `127.0.0.1` / `8080` | bind address |
 | `HE_MAX_PAYLOAD_BYTES` | `1900000000` | reject payloads near TenSEAL's ~2 GiB serialization ceiling |
 
-### Chat client
-
-`chat_agent.py` reads its key from the environment — set it before running:
-
-```bash
-export AZURE_OPENAI_KEY="<your-key>"
-python chat_agent.py
-```
-
 ## Notes on HE parameters
 
 - **BFV** gives exact integer results; **CKKS** gives approximate real results, and the
-  approximation error grows with multiplicative depth (see `ckks_error_scaling`).
+  approximation error grows with multiplicative depth.
 - `poly_modulus_degree` sets both security and capacity: larger degree = more
   multiplicative depth and more SIMD slots, but quadratically larger/slower ciphertexts.
   A ciphertext holds at most `degree` (BFV) or `degree/2` (CKKS) values per request.
