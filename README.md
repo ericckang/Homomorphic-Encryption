@@ -57,22 +57,71 @@ pip install -r requirements.txt
 
 ## Running
 
-The server is meaningless on its own — the agent generates the keys and ciphertext.
-Run them in **two terminals**.
+The easiest way to demo the system is through the **web dashboard**. The server
+hosts both the untrusted compute service and a small dashboard that can trigger
+the trusted agent flow in the background.
+
+### Option A — Recommended: web dashboard demo
+
+Start the server in one terminal. Since the dashboard-triggered agent run happens
+inside the server process, Azure OpenAI credentials must be available in the
+same shell before launching `server.py`.
+
+```bash
+export AZURE_OPENAI_KEY="<your-key>"
+python server.py
+# serves http://127.0.0.1:8080  (docs at /docs)
+```
+
+If your Azure setup also requires endpoint / deployment / API version, export
+those too:
+
+```bash
+export AZURE_OPENAI_KEY="<your-key>"
+export AZURE_OPENAI_ENDPOINT="https://<your-resource>.openai.azure.com/"
+export AZURE_OPENAI_DEPLOYMENT="<your-deployment>"
+export AZURE_OPENAI_API_VERSION="2024-12-01-preview"
+python server.py
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8080
+```
+
+Use the **Run Demo Task** box and include inline data directly in the prompt, for example:
+
+```text
+Compare each salary to 90000 and double the difference. data=[85000, 90000, 95000]
+```
+
+The dashboard shows:
+- a live HE pipeline progress bar,
+- the agent's chosen schema and HE scheme,
+- the server's ciphertext payload size and hex preview,
+- the final decrypted result and timing metrics,
+- sample input / expected / decrypted values.
+
+This dashboard is designed to make the privacy boundary visible: the server only
+sees ciphertext bytes and cannot decrypt them; readable numbers appear only after
+the agent decrypts the returned result.
+
+### Option B — CLI agent + server in two terminals
+
+You can still run the original interactive CLI flow.
 
 **Terminal 1 — the untrusted server:**
 ```bash
 python server.py
-# serves http://127.0.0.1:8080  (docs at /docs)
 ```
-On boot it logs `This node holds NO secret key and cannot decrypt any payload.`
-and enables generic BFV/CKKS compute.
 
 **Terminal 2 — the client / generalized HE agent:**
 ```bash
 export AZURE_OPENAI_KEY="<your-key>"
 python agent.py
 ```
+
 The agent asks for a natural-language task prompt. You can include data inline:
 
 ```text
@@ -101,9 +150,9 @@ like vector length and integer-vs-float type. It returns a JSON operation schema
 using a bounded DSL (`add_scalar`, `sub_scalar`, `mul_scalar`, `square`,
 `polynomial`). The agent encrypts locally, sends the schema plus ciphertext to
 the compute service, decrypts the returned ciphertext, and prints result samples,
-performance, and CKKS approximation error when applicable. Watch the **server**
-terminal: every request logs a `BLIND-EVAL` line with the ciphertext size and a
-hex preview — the proof that the server only ever sees gibberish.
+performance, and CKKS approximation error when applicable. Watch the server log:
+every request logs a `BLIND-EVAL` line with the ciphertext size and a hex preview
+— the proof that the server only ever sees gibberish.
 
 Before encryption, the agent runs preflight checks for unsupported tasks,
 excessive multiplication depth, large input vectors, and estimated payload size.
