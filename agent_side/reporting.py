@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from he_common.demo_state import update_result
+
 
 def print_report(
     plan: dict[str, Any],
@@ -12,6 +14,33 @@ def print_report(
     timings: dict[str, float],
     poly_mod_degree: int,
 ) -> None:
+    sample_count = min(5, len(decrypted))
+    samples = [
+        {
+            "index": idx,
+            "input": original_data[idx],
+            "expected": expected[idx],
+            "decrypted": decrypted[idx],
+        }
+        for idx in range(sample_count)
+    ]
+
+    result_summary = {
+        "schema_name": plan["schema_name"],
+        "scheme": plan["scheme"],
+        "computation_type": plan["computation_type"],
+        "formula": plan["plaintext_formula"],
+        "notes": plan["notes"],
+        "vector_length": len(original_data),
+        "poly_modulus_degree": poly_mod_degree,
+        "ciphertext_size_kb": server_response["_payload_size_kb"],
+        "encryption_time_sec": timings["encryption"],
+        "evaluation_time_sec": server_response["evaluation_time_sec"],
+        "roundtrip_time_sec": server_response["_roundtrip_time_sec"],
+        "decryption_time_sec": timings["decryption"],
+        "server_audit": server_response["audit"],
+        "samples": samples,
+    }
     print("\n" + "=" * 72)
     print("Generalized HE Agent Result")
     print("=" * 72)
@@ -29,17 +58,21 @@ def print_report(
     print(f"Decryption time    : {timings['decryption']:.4f} sec")
     print(f"Server audit       : {server_response['audit']['payload_kb']} KB ciphertext")
 
-    sample_count = min(5, len(decrypted))
     print("\nResult sample")
-    for idx in range(sample_count):
+    for sample in samples:
         print(
-            f"  [{idx}] input={original_data[idx]:.6g} "
-            f"expected={expected[idx]:.6g} decrypted={decrypted[idx]:.6g}"
+            f"  [{sample['index']}] input={sample['input']:.6g} "
+            f"expected={sample['expected']:.6g} decrypted={sample['decrypted']:.6g}"
         )
 
     if plan["scheme"] == "CKKS":
         errors = [abs(a - b) for a, b in zip(expected, decrypted)]
-        print(f"\nCKKS max abs error : {max(errors):.8f}")
+        max_error = max(errors)
+        result_summary["max_abs_error"] = max_error
+        print(f"\nCKKS max abs error : {max_error:.8f}")
     else:
         mismatches = sum(int(round(a)) != int(round(b)) for a, b in zip(expected, decrypted))
+        result_summary["exact_mismatches"] = mismatches
         print(f"\nBFV exact mismatches: {mismatches}")
+
+    update_result(result_summary)

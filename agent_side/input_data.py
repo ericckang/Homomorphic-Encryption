@@ -11,8 +11,16 @@ def collect_task_and_data() -> tuple[str, str, list[float]]:
     task_prompt = input(
         "\nTask prompt (you may include data=[1, 2, 3], or leave data out for CSV):\n> "
     ).strip()
+    return resolve_task_and_data(task_prompt)
+
+
+def resolve_task_and_data(task_prompt: str, manual_values: str | None = None) -> tuple[str, str, list[float]]:
     data, redacted_prompt = extract_inline_data(task_prompt)
     if data is not None:
+        return task_prompt, redacted_prompt, data
+
+    if manual_values is not None and manual_values.strip():
+        data = coerce_numeric_vector(ast.literal_eval(manual_values.strip()))
         return task_prompt, redacted_prompt, data
 
     csv_path = input("\nCSV path with a 'value' column (blank to enter values manually): ").strip()
