@@ -15,6 +15,7 @@ Run:  python scripts/benchmark_boundary.py    (no server required)
 """
 import tenseal as ts
 import gc
+import time
 
 HARD_2GB = 1_900_000_000  # mirrors the server's HE_MAX_PAYLOAD_BYTES guard
 
@@ -112,8 +113,67 @@ def boundary_4_depth():
         gc.collect()
 
 
+def boundary_5_runtime_scaling():
+    print("\n### BOUNDARY 5 — Data size vs runtime for representative workloads")
+    print("Times are local measurements: encrypt, evaluate on ciphertext, decrypt.\n")
+    print("BFV workload: (x - 90000) * 2")
+    print(f"{'batch':>7} {'payload_MB':>11} {'encrypt_s':>10} {'eval_s':>10} {'decrypt_s':>10}")
+    for batch in [16, 128, 1024, 4096, 8192]:
+        ctx = bfv_ctx(4096 if batch <= 4096 else 8192)
+        data = [85000 + (i % 5000) for i in range(batch)]
+
+        t0 = time.perf_counter()
+        encrypted = ts.bfv_vector(ctx, data)
+        encrypt_s = time.perf_counter() - t0
+
+        payload_mb = len(encrypted.serialize()) / 1024 / 1024
+
+        t0 = time.perf_counter()
+        result = (encrypted - ([90000] * batch)) * 2
+        eval_s = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        _ = result.decrypt()
+        decrypt_s = time.perf_counter() - t0
+
+        print(f"{batch:>7} {payload_mb:>11.2f} {encrypt_s:>10.4f} {eval_s:>10.4f} {decrypt_s:>10.4f}")
+        del ctx, encrypted, result
+        gc.collect()
+
+    print("\nCKKS workload: 0.0001*x^2 + 0.01*x")
+    print(f"{'batch':>7} {'payload_MB':>11} {'encrypt_s':>10} {'eval_s':>10} {'decrypt_s':>10} {'max_error':>11}")
+    for batch in [16, 128, 1024, 4096]:
+        ctx = ckks_ctx(16384, [60, 40, 40, 40, 40, 60])
+        data = [20.0 + (i % 1000) * 0.5 for i in range(batch)]
+
+        t0 = time.perf_counter()
+        encrypted = ts.ckks_vector(ctx, data)
+        encrypt_s = time.perf_counter() - t0
+
+        payload_mb = len(encrypted.serialize()) / 1024 / 1024
+
+        t0 = time.perf_counter()
+        result = (encrypted.square() * 0.0001) + (encrypted * 0.01)
+        eval_s = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        decrypted = result.decrypt()
+        decrypt_s = time.perf_counter() - t0
+
+        expected = [(x * x * 0.0001) + (x * 0.01) for x in data]
+        max_error = max(abs(a - b) for a, b in zip(expected, decrypted))
+
+        print(
+            f"{batch:>7} {payload_mb:>11.2f} {encrypt_s:>10.4f} "
+            f"{eval_s:>10.4f} {decrypt_s:>10.4f} {max_error:>11.6f}"
+        )
+        del ctx, encrypted, result
+        gc.collect()
+
+
 if __name__ == "__main__":
     boundary_1_slots()
     boundary_2_serialization()
     boundary_3_context_size()
     boundary_4_depth()
+    boundary_5_runtime_scaling()

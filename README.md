@@ -11,14 +11,14 @@ This repo is the server/transport + compute half of a larger
 
 | Component | File | Role |
 |-----------|------|------|
-| **Agent / client** | `agent.py`, `agent_side/` | Trusted data-owner side. Uses Azure OpenAI to plan an HE operation schema from a task prompt, generates keys, encrypts input data locally, calls the server, and is the only party that can decrypt the result. |
+| **Agent / client** | `agent.py`, `agent_side/` | Trusted data-owner side. Hosts the agent UI, uses Azure OpenAI to plan an HE operation schema from a task prompt, generates keys, encrypts input data locally, calls the server, stores local results, and is the only party that can decrypt the result. |
 | **Blind-evaluator server** | `server.py`, `server_side/` | Untrusted FastAPI compute node. Operates entirely on ciphertext; holds no secret key, refuses any context that carries one, and runs only the generic BFV/CKKS operation schema. |
 | **Shared definitions** | `he_common/` | Non-sensitive config and operation schema validation shared by both sides. |
 
 ### File layout
 
 ```text
-agent.py                 # thin entrypoint for the trusted data-owner agent
+agent.py                 # trusted data-owner agent web UI by default, CLI with --cli
 server.py                # thin entrypoint for the untrusted compute service
 agent_side/              # input parsing, LLM planning, encryption, transport, reporting
 server_side/             # FastAPI app, security checks, generic HE operations
@@ -57,31 +57,17 @@ pip install -r requirements.txt
 
 ## Running
 
-The easiest way to demo the system is through the **web dashboard**. The server
-hosts both the untrusted compute service and a small dashboard that can trigger
-the trusted agent flow in the background.
+The recommended demo uses two independent processes and two browser views: one
+untrusted compute server and one trusted data-owner agent. This matches the
+privacy boundary in the project spec.
 
-### Option A — Recommended: web dashboard demo
+### Terminal 1 — untrusted compute server
 
-Start the server in one terminal. Since the dashboard-triggered agent run happens
-inside the server process, Azure OpenAI credentials must be available in the
-same shell before launching `server.py`.
+Start the server in one terminal:
 
 ```bash
-export AZURE_OPENAI_KEY="<your-key>"
-python server.py
+python3 server.py
 # serves http://127.0.0.1:8080  (docs at /docs)
-```
-
-If your Azure setup also requires endpoint / deployment / API version, export
-those too:
-
-```bash
-export AZURE_OPENAI_KEY="<your-key>"
-export AZURE_OPENAI_ENDPOINT="https://<your-resource>.openai.azure.com/"
-export AZURE_OPENAI_DEPLOYMENT="<your-deployment>"
-export AZURE_OPENAI_API_VERSION="2024-12-01-preview"
-python server.py
 ```
 
 Then open:
@@ -90,49 +76,65 @@ Then open:
 http://127.0.0.1:8080
 ```
 
-Use the **Run Demo Task** box and include inline data directly in the prompt, for example:
+The server dashboard is read-only. It shows server-side ciphertext audit data,
+but it does not collect plaintext input and does not run trusted agent code.
 
-```text
-Compare each salary to 90000 and double the difference. data=[85000, 90000, 95000]
-```
+### Terminal 2 — trusted agent UI
 
-The dashboard shows:
-- a live HE pipeline progress bar,
-- the agent's chosen schema and HE scheme,
-- the server's ciphertext payload size and hex preview,
-- the final decrypted result and timing metrics,
-- sample input / expected / decrypted values.
+Run the trusted agent in a second terminal. Azure OpenAI credentials must be
+available only in the agent shell:
 
-This dashboard is designed to make the privacy boundary visible: the server only
-sees ciphertext bytes and cannot decrypt them; readable numbers appear only after
-the agent decrypts the returned result.
-
-### Option B — CLI agent + server in two terminals
-
-You can still run the original interactive CLI flow.
-
-**Terminal 1 — the untrusted server:**
-```bash
-python server.py
-```
-
-**Terminal 2 — the client / generalized HE agent:**
 ```bash
 export AZURE_OPENAI_KEY="<your-key>"
-python agent.py
+python3 agent.py
+# serves http://127.0.0.1:8081
 ```
 
-The agent asks for a natural-language task prompt. You can include data inline:
+If your Azure setup also requires endpoint / deployment / API version, export
+those too before running `agent.py`:
+
+```bash
+export AZURE_OPENAI_KEY="<your-key>"
+export AZURE_OPENAI_ENDPOINT="https://<your-resource>.openai.azure.com/"
+export AZURE_OPENAI_DEPLOYMENT="<your-deployment>"
+export AZURE_OPENAI_API_VERSION="2024-12-01-preview"
+python3 agent.py
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8081
+```
+
+The agent UI accepts a natural-language task prompt and inline/manual/CSV data.
+It runs local preflight checks before calling the LLM or sending anything to the
+server. If the task is unsupported or the estimated payload is too large, the
+agent blocks the request locally and shows a warning.
+
+You can include data inline:
 
 ```text
 Compare each salary to 90000 and double the difference. data=[85000, 90000, 95000]
 ```
 
-Or leave the data out and provide a CSV path when prompted:
+Or leave the data out and use the manual values or CSV upload field:
 
 ```text
 Compute a nonlinear medical risk score using x^8 + x^4 + x^2.
 ```
+
+The agent UI shows:
+- live HE pipeline status,
+- the agent's schema name, input profile, and payload estimate,
+- the server's ciphertext payload size and hex preview,
+- the final decrypted result, timings, and accuracy check,
+- sample input / expected / decrypted values,
+- the saved local JSON result path under `agent_results/`.
+
+The dashboards are designed to make the privacy boundary visible: the server only
+sees ciphertext bytes and cannot decrypt them; readable numbers appear only after
+the agent decrypts the returned result.
 
 CSV format is one numeric vector in a `value` column:
 
@@ -144,6 +146,13 @@ value
 ```
 
 See `data/sample_data.csv` for a ready-to-run example.
+
+To use the older terminal-only agent flow instead of the web UI:
+
+```bash
+export AZURE_OPENAI_KEY="<your-key>"
+python3 agent.py --cli
+```
 
 The LLM receives only the task text with raw data redacted plus basic metadata
 like vector length and integer-vs-float type. It returns a JSON operation schema
@@ -165,17 +174,17 @@ clear explanation.
 Run a syntax check:
 
 ```bash
-python -m compileall agent.py server.py agent_side server_side he_common scripts
+python3 -m compileall agent.py server.py agent_side server_side he_common scripts
 ```
 
 Run the end-to-end smoke test without an Azure OpenAI key:
 
 ```bash
 # Terminal 1
-python server.py
+python3 server.py
 
 # Terminal 2
-python scripts/smoke_test.py
+python3 scripts/smoke_test.py
 ```
 
 The smoke test sends fixed BFV and CKKS operation schemas directly to the
@@ -184,7 +193,13 @@ server. It verifies exact BFV decryption and bounded CKKS approximation error.
 Run the HE boundary benchmark:
 
 ```bash
-python scripts/benchmark_boundary.py
+python3 scripts/benchmark_boundary.py
+```
+
+Read the benchmark summary:
+
+```text
+BENCHMARK.md
 ```
 
 See `SPEC.md` for the full architecture, privacy model, and testing notes.
@@ -197,6 +212,7 @@ The server reads optional environment variables (all have defaults):
 |----------|---------|---------|
 | `HE_SHARED_DIR` | `./he_shared` | shared data-plane directory |
 | `HE_HOST` / `HE_PORT` | `127.0.0.1` / `8080` | bind address |
+| `HE_AGENT_HOST` / `HE_AGENT_PORT` | `127.0.0.1` / `8081` | trusted agent UI bind address |
 | `HE_MAX_PAYLOAD_BYTES` | `1900000000` | reject payloads near TenSEAL's ~2 GiB serialization ceiling |
 
 ## Notes on HE parameters

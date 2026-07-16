@@ -11,6 +11,7 @@ env/
 
 # HE generated artifacts (ciphertexts, contexts, results)
 he_shared/
+agent_results/
 
 # Editor / OS
 .DS_Store

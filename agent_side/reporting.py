@@ -13,7 +13,7 @@ def print_report(
     server_response: dict[str, Any],
     timings: dict[str, float],
     poly_mod_degree: int,
-) -> None:
+) -> dict[str, Any]:
     sample_count = min(5, len(decrypted))
     samples = [
         {
@@ -76,3 +76,4 @@ def print_report(
         print(f"\nBFV exact mismatches: {mismatches}")
 
     update_result(result_summary)
+    return result_summary

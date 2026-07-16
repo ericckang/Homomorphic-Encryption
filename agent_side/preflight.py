@@ -33,6 +33,22 @@ class PreflightResult:
     estimated_payload_bytes: int
 
 
+def preflight_input_vector(data: list[float]) -> None:
+    if not data:
+        raise ValueError("Input data cannot be empty.")
+    if len(data) > MAX_VECTOR_LENGTH:
+        raise ValueError(
+            f"Input vector has {len(data):,} values, which exceeds the agent preflight "
+            f"limit of {MAX_VECTOR_LENGTH:,}. Use a smaller batch or aggregate locally first."
+        )
+    conservative_estimate = estimate_payload_bytes("CKKS", len(data))
+    if conservative_estimate > MAX_ESTIMATED_PAYLOAD_BYTES:
+        raise ValueError(
+            f"Conservative ciphertext estimate is {conservative_estimate / 1024 / 1024:.1f} MB, "
+            "which is too close to the serialization limit. Use a smaller batch."
+        )
+
+
 def preflight_task_prompt(redacted_prompt: str) -> None:
     prompt = redacted_prompt.lower()
     for hint, explanation in UNSUPPORTED_TASK_HINTS.items():
@@ -97,3 +113,15 @@ def estimate_payload_bytes(scheme: str, vector_length: int) -> int:
     bytes_per_value = 260 if scheme == "BFV" else 1_600
     base_overhead = 256_000 if scheme == "BFV" else 1_500_000
     return base_overhead + vector_length * bytes_per_value
+
+
+def agent_limits() -> dict[str, Any]:
+    return {
+        "max_vector_length": MAX_VECTOR_LENGTH,
+        "max_operation_count": MAX_OPERATION_COUNT,
+        "max_ckks_depth": MAX_CKKS_DEPTH,
+        "max_bfv_depth": MAX_BFV_DEPTH,
+        "max_estimated_payload_bytes": MAX_ESTIMATED_PAYLOAD_BYTES,
+        "supported_operations": ["add_scalar", "sub_scalar", "mul_scalar", "square", "polynomial"],
+        "unsupported_task_hints": UNSUPPORTED_TASK_HINTS,
+    }

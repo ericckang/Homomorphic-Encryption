@@ -6,10 +6,11 @@ from typing import Any
 
 from agent_side.crypto import decrypt_vector, encrypt_vector, make_context
 from agent_side.planner import plan_he_task
-from agent_side.preflight import preflight_plan, preflight_task_prompt
+from agent_side.preflight import preflight_input_vector, preflight_plan, preflight_task_prompt
 from agent_side.reporting import print_report
+from agent_side.result_store import save_agent_result
 from agent_side.transport import post_compute
-from he_common.demo_state import reset_demo_state, update_agent
+from he_common.demo_state import reset_demo_state, update_agent, update_result
 from he_common.operations import (
     apply_plaintext_pipeline,
     data_profile,
@@ -23,6 +24,7 @@ def run_agent_task(redacted_prompt: str, data: list[float], *, reset_state: bool
         reset_demo_state()
     update_agent("collecting_input", "Task received from user input.", {"vector_length": len(data)})
 
+    preflight_input_vector(data)
     profile = data_profile(data)
     preflight_task_prompt(redacted_prompt)
 
@@ -66,7 +68,7 @@ def run_agent_task(redacted_prompt: str, data: list[float], *, reset_state: bool
 
     expected = apply_plaintext_pipeline(data, plan["operations"])
     update_agent("reporting", "Preparing final result summary for the dashboard.")
-    print_report(
+    result_summary = print_report(
         plan,
         data,
         decrypted,
@@ -75,7 +77,14 @@ def run_agent_task(redacted_prompt: str, data: list[float], *, reset_state: bool
         {"encryption": encryption_time, "decryption": decryption_time},
         poly_mod_degree,
     )
-    update_agent("done", "Agent run completed successfully.", {"schema_name": plan["schema_name"]})
+    saved_result_path = save_agent_result(result_summary)
+    result_summary["saved_result_path"] = saved_result_path
+    update_result(result_summary)
+    update_agent(
+        "done",
+        "Agent run completed successfully.",
+        {"schema_name": plan["schema_name"], "saved_result_path": saved_result_path},
+    )
 
     return {
         "plan": plan,
@@ -84,4 +93,5 @@ def run_agent_task(redacted_prompt: str, data: list[float], *, reset_state: bool
         "server_response": server_response,
         "timings": {"encryption": encryption_time, "decryption": decryption_time},
         "poly_mod_degree": poly_mod_degree,
+        "result_summary": result_summary,
     }

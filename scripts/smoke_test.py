@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent_side.crypto import decrypt_vector, encrypt_vector, make_context
 from agent_side.preflight import preflight_plan
 from agent_side.transport import post_compute
+from he_common.config import SERVER_URL
 from he_common.operations import (
     apply_plaintext_pipeline,
     data_profile,
@@ -88,7 +89,7 @@ def _run_plan(data: list[float], plan: dict) -> tuple[list[float], list[float]]:
 
 
 def main() -> None:
-    print("Running end-to-end HE smoke tests against http://localhost:8080 ...")
+    print(f"Running end-to-end HE smoke tests against {SERVER_URL} ...")
     run_bfv_test()
     run_ckks_test()
     print("All smoke tests passed.")

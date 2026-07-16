@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-import threading
 import time
 
 import tenseal as ts
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
 
-from agent_side.input_data import resolve_task_and_data
-from agent_side.runner import run_agent_task
-from he_common.demo_state import read_demo_state, update_agent, update_server
+from he_common.demo_state import read_demo_state, update_server
 from server_side.api_models import ComputeRequest, ComputeResponse
 from server_side.logging_config import audit, log
 from server_side.pipeline import run_pipeline
@@ -21,13 +17,6 @@ from server_side.types import ComputeResult
 
 
 app = FastAPI(title="HE Blind-Evaluator Compute Service")
-_demo_lock = threading.Lock()
-_demo_running = False
-
-
-class DemoRunRequest(BaseModel):
-    task_prompt: str
-    manual_values: str | None = None
 
 
 @app.on_event("startup")
@@ -171,11 +160,17 @@ def dashboard() -> str:
 
   <div class=\"grid\">
     <section class=\"card\">
-      <div class=\"label\">Run Demo Task</div>
-      <div class=\"muted\">Enter a natural-language task. You may include inline data like <code>data=[85000, 90000, 95000]</code>.</div>
-      <p><textarea id=\"task-prompt\" style=\"min-height:120px;background:#0f172a;color:#e5e7eb;border:1px solid #334155;border-radius:10px;padding:12px;\">Compare each salary to 90000 and double the difference. data=[85000, 90000, 95000]</textarea></p>
-      <button id=\"run-button\" onclick=\"runDemo()\" style=\"background:#386381;color:white;border:none;border-radius:10px;padding:10px 16px;font-weight:700;cursor:pointer;\">Run Agent Demo</button>
-      <div class=\"muted\" id=\"run-status\" style=\"margin-top:10px;\"></div>
+      <div class=\"label\">Two-Process Demo</div>
+      <div class=\"value\">Run the trusted agent separately</div>
+      <div class=\"muted\">This dashboard belongs to the untrusted server process. It monitors <code>he_shared/demo_status.json</code> and the server compute log, but it does not execute agent code.</div>
+      <pre># Terminal 1: untrusted compute server
+python server.py
+
+# Terminal 2: trusted data-owner agent
+export AZURE_OPENAI_KEY=\"&lt;your-key&gt;\"
+python agent.py</pre>
+      <div class=\"muted\">Example prompt for the agent:</div>
+      <pre>Compare each salary to 90000 and double the difference. data=[85000, 90000, 95000]</pre>
     </section>
 
     <section class=\"card\">
@@ -241,31 +236,6 @@ def dashboard() -> str:
   <script>
     function pretty(obj) {
       return JSON.stringify(obj ?? {}, null, 2);
-    }
-
-    async function runDemo() {
-      const taskPrompt = document.getElementById('task-prompt').value.trim();
-      const runStatus = document.getElementById('run-status');
-      const runButton = document.getElementById('run-button');
-      runStatus.textContent = 'Submitting task...';
-      runButton.disabled = true;
-      runButton.textContent = 'Running...';
-      runButton.style.opacity = '0.7';
-      runButton.style.cursor = 'not-allowed';
-
-      const res = await fetch('/demo/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_prompt: taskPrompt }),
-      });
-      const data = await res.json();
-      runStatus.textContent = data.message || data.detail || 'Request sent.';
-      if (!res.ok) {
-        runButton.disabled = false;
-        runButton.textContent = 'Run Agent Demo';
-        runButton.style.opacity = '1';
-        runButton.style.cursor = 'pointer';
-      }
     }
 
     function setText(id, value) {
@@ -358,14 +328,6 @@ def dashboard() -> str:
       setText('result-max-error', result?.scheme === 'CKKS' ? (result?.max_abs_error ?? '-') : 'N/A');
       setText('result-mismatches', result?.scheme === 'BFV' ? (result?.exact_mismatches ?? '-') : 'N/A');
 
-      const runButton = document.getElementById('run-button');
-      if (agentStage === 'done' || agentStage === 'error' || agentStage === 'idle') {
-        runButton.disabled = false;
-        runButton.textContent = 'Run Agent Demo';
-        runButton.style.opacity = '1';
-        runButton.style.cursor = 'pointer';
-      }
-
       const tbody = document.getElementById('samples-body');
       const samples = result?.samples || [];
       tbody.innerHTML = samples.length
@@ -392,31 +354,6 @@ def dashboard() -> str:
 @app.get("/demo/status")
 def demo_status() -> dict:
     return read_demo_state()
-
-
-@app.post("/demo/run")
-def demo_run(req: DemoRunRequest) -> dict:
-    global _demo_running
-
-    with _demo_lock:
-        if _demo_running:
-            raise HTTPException(409, "A demo run is already in progress.")
-        _demo_running = True
-
-    def worker() -> None:
-        global _demo_running
-        try:
-            _, redacted_prompt, data = resolve_task_and_data(req.task_prompt, req.manual_values)
-            run_agent_task(redacted_prompt, data)
-        except Exception as exc:
-            update_agent("error", str(exc))
-            update_server("idle", "Server is ready and waiting for compute requests.")
-        finally:
-            with _demo_lock:
-                _demo_running = False
-
-    threading.Thread(target=worker, daemon=True).start()
-    return {"status": "started", "message": "Demo run started. Watch the dashboard for live updates."}
 
 
 @app.get("/health")

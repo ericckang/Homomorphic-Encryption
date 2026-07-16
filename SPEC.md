@@ -17,7 +17,7 @@ The server never receives user plaintext data or a secret key.
 ## 2. System Components
 
 ```text
-agent.py                 Thin entrypoint for the trusted data-owner agent
+agent.py                 Trusted data-owner agent UI; CLI mode with --cli
 server.py                Thin entrypoint for the untrusted compute service
 agent_side/              Agent-side input, planning, encryption, transport, reporting
 server_side/             Server-side API, validation, encrypted compute pipeline
@@ -25,6 +25,7 @@ he_common/               Shared non-sensitive config and operation schema helper
 data/sample_data.csv     Example CSV input
 scripts/smoke_test.py    End-to-end BFV/CKKS smoke test, no Azure key required
 scripts/benchmark_boundary.py
+BENCHMARK.md             Benchmark summary and presentation notes
 ```
 
 ### Agent Side
@@ -32,28 +33,34 @@ scripts/benchmark_boundary.py
 The agent side is trusted. It handles:
 
 - User task prompt and numeric input parsing.
+- Agent-side web UI for prompt, manual vector input, and CSV upload.
 - Azure OpenAI planning from a redacted task prompt.
+- Early preflight checks before LLM planning and server transfer.
 - HE parameter selection.
 - Key/context generation.
 - Local encryption and decryption.
 - Sending ciphertext metadata to the server.
 - Printing decrypted results, timings, and CKKS approximation error.
+- Saving local JSON result summaries under `agent_results/`.
 
 Important files:
 
 - `agent_side/cli.py`: orchestrates the full agent workflow.
+- `agent_side/app.py`: trusted agent web UI and API.
 - `agent_side/input_data.py`: parses inline data or CSV input.
 - `agent_side/planner.py`: calls Azure OpenAI to produce an operation schema.
 - `agent_side/preflight.py`: rejects unsupported or impractical plans before encryption.
 - `agent_side/crypto.py`: creates TenSEAL contexts and encrypts/decrypts vectors.
 - `agent_side/transport.py`: writes ciphertext artifacts and calls the server.
 - `agent_side/reporting.py`: prints result and performance reports.
+- `agent_side/result_store.py`: saves local agent-side JSON result summaries.
 
 ### Server Side
 
 The server side is untrusted. It handles:
 
 - FastAPI `/compute` requests.
+- Read-only dashboard status monitoring.
 - Public context and ciphertext loading.
 - Secret-key rejection.
 - Path confinement to `he_shared/`.
@@ -68,6 +75,11 @@ Important files:
 - `server_side/pipeline.py`: executes the approved operation DSL.
 - `server_side/results.py`: writes encrypted result files.
 - `server_side/types.py`: shared server-side result data structures.
+
+The dashboard served by `server.py` does not collect plaintext input and does
+not execute trusted agent code. It only polls `he_shared/demo_status.json` and
+displays status written by the separate agent process and server compute
+endpoint.
 
 ### Shared Code
 
@@ -256,21 +268,23 @@ Supported DSL operations:
 ```text
 1. User starts server.py.
 2. User starts agent.py.
-3. Agent reads task prompt and numeric data.
-4. Agent redacts raw data before the LLM planner call.
-5. LLM returns an operation schema.
-6. Agent validates the schema.
-7. Agent runs preflight checks for vector size, payload estimate, and HE depth.
-8. Agent selects BFV or CKKS and creates a TenSEAL context.
-9. Agent encrypts the input vector locally.
-10. Agent writes public context and ciphertext to he_shared/.
-11. Agent sends file paths, scheme, and operations to server /compute.
-12. Server verifies paths are inside he_shared/.
-13. Server rejects contexts containing a secret key.
-14. Server executes operations over ciphertext.
-15. Server writes encrypted result to he_shared/.
-16. Agent reads encrypted result and decrypts locally.
-17. Agent prints decrypted sample, timings, and CKKS error when applicable.
+3. User opens the trusted agent UI on port 8081.
+4. Agent reads task prompt and numeric data.
+5. Agent runs early preflight checks for empty input, vector size, and payload estimate.
+6. Agent redacts raw data before the LLM planner call.
+7. LLM returns an operation schema.
+8. Agent validates the schema.
+9. Agent runs plan preflight checks for operation count and HE depth.
+10. Agent selects BFV or CKKS and creates a TenSEAL context.
+11. Agent encrypts the input vector locally.
+12. Agent writes public context and ciphertext to he_shared/.
+13. Agent sends file paths, scheme, and operations to server /compute.
+14. Server verifies paths are inside he_shared/.
+15. Server rejects contexts containing a secret key.
+16. Server executes operations over ciphertext.
+17. Server writes encrypted result to he_shared/.
+18. Agent reads encrypted result and decrypts locally.
+19. Agent shows decrypted samples, timings, CKKS error when applicable, and the saved result path.
 ```
 
 ## 8. How to Run
@@ -286,14 +300,26 @@ pip install -r requirements.txt
 Run the server in terminal 1:
 
 ```bash
-python server.py
+python3 server.py
+```
+
+Optional dashboard monitor:
+
+```text
+http://127.0.0.1:8080
 ```
 
 Run the agent in terminal 2:
 
 ```bash
 export AZURE_OPENAI_KEY="<your-key>"
-python agent.py
+python3 agent.py
+```
+
+Open the trusted agent UI:
+
+```text
+http://127.0.0.1:8081
 ```
 
 Example inline BFV prompt:
@@ -314,6 +340,12 @@ When prompted for a CSV path:
 data/sample_data.csv
 ```
 
+The old terminal-only agent is still available:
+
+```bash
+python3 agent.py --cli
+```
+
 Example CKKS prompt:
 
 ```text
@@ -325,7 +357,7 @@ Compute a nonlinear medical risk score using x^8 + x^4 + x^2. data=[1.05, 1.10, 
 ### Syntax Check
 
 ```bash
-python -m compileall agent.py server.py agent_side server_side he_common scripts
+python3 -m compileall agent.py server.py agent_side server_side he_common scripts
 ```
 
 ### End-to-End Smoke Test
@@ -336,13 +368,13 @@ uses fixed operation schemas for BFV and CKKS.
 Start the server:
 
 ```bash
-python server.py
+python3 server.py
 ```
 
 In a second terminal:
 
 ```bash
-python scripts/smoke_test.py
+python3 scripts/smoke_test.py
 ```
 
 Expected behavior:
@@ -372,13 +404,39 @@ payload-size enforcement.
 The boundary benchmark does not require the server:
 
 ```bash
-python scripts/benchmark_boundary.py
+python3 scripts/benchmark_boundary.py
 ```
 
 It measures approximate operating limits such as slot capacity, payload growth,
 serialization boundary, and CKKS multiplicative-depth behavior.
 
-## 10. Git Hygiene
+See `BENCHMARK.md` for the presentation-oriented benchmark summary and current
+system limitations.
+
+## 10. Current Limitations
+
+This project is a capstone prototype, not a production HE platform.
+
+- Inputs are limited to one numeric vector from inline data or a one-column CSV.
+- The generic operation schema is element-wise; it does not support arbitrary
+  table joins, multi-column feature matrices, or general dataframes.
+- Supported operations are limited to scalar addition/subtraction/multiplication,
+  squaring, and bounded polynomials.
+- Unsupported computations include sorting, median, min/max, branching,
+  boolean thresholding, encrypted division, ranking, and general classifiers.
+- Salary comparison can be demonstrated as an offset or score, but exact
+  encrypted greater-than/less-than comparison is not implemented.
+- Financial and medical examples are polynomial scoring demos, not full ML
+  fraud/risk models.
+- Full multi-party federated aggregation is not implemented; the current server
+  accepts one ciphertext payload per compute request.
+- `he_shared/` is a local demo transport. A production system would use a
+  remote object store, upload API, or message queue for ciphertext artifacts.
+- CKKS results are approximate, and error grows with multiplicative depth.
+- Large vectors create large ciphertext payloads and slower encryption,
+  evaluation, transfer, and decryption.
+
+## 11. Git Hygiene
 
 Do not commit:
 
@@ -388,6 +446,7 @@ Do not commit:
 - `.env`
 - API keys
 - `he_shared/`
+- `agent_results/`
 - `.DS_Store`
 - IDE settings
 
