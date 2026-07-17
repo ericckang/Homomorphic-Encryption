@@ -13,8 +13,6 @@ MAX_BFV_DEPTH = 2
 MAX_ESTIMATED_PAYLOAD_BYTES = 1_900_000_000
 
 UNSUPPORTED_TASK_HINTS = {
-    "average": "Encrypted division is not supported. Send encrypted sum and count, then divide after decryption.",
-    "mean": "Encrypted division is not supported. Send encrypted sum and count, then divide after decryption.",
     "median": "Median requires sorting/comparison, which is not supported by this HE pipeline.",
     "sort": "Sorting requires comparisons and branching, which are not supported by this HE pipeline.",
     "minimum": "Min/max require comparisons, which are not supported by this HE pipeline.",
@@ -74,6 +72,8 @@ def preflight_plan(plan: dict[str, Any], vector_length: int) -> PreflightResult:
             f"Operation plan has {len(operations)} steps, which exceeds the limit "
             f"of {MAX_OPERATION_COUNT}."
         )
+    if scheme == "BFV" and any(operation["op"] == "mean_reduce" for operation in operations):
+        raise ValueError("BFV mean_reduce is not supported in this demo. Use CKKS or divide after decryption.")
 
     if scheme == "CKKS" and depth > MAX_CKKS_DEPTH:
         raise ValueError(
@@ -101,6 +101,10 @@ def preflight_plan(plan: dict[str, Any], vector_length: int) -> PreflightResult:
         warnings.append(
             "Large vectors can produce large ciphertext payloads and slow encryption/evaluation."
         )
+    if any(operation["op"] in {"sum_reduce", "mean_reduce", "dot_product_public"} for operation in operations):
+        warnings.append(
+            "Reduction operations require slot rotations and Galois keys, which increase context size and eval cost."
+        )
 
     return PreflightResult(warnings=warnings, estimated_payload_bytes=estimated_payload_bytes)
 
@@ -122,6 +126,15 @@ def agent_limits() -> dict[str, Any]:
         "max_ckks_depth": MAX_CKKS_DEPTH,
         "max_bfv_depth": MAX_BFV_DEPTH,
         "max_estimated_payload_bytes": MAX_ESTIMATED_PAYLOAD_BYTES,
-        "supported_operations": ["add_scalar", "sub_scalar", "mul_scalar", "square", "polynomial"],
+        "supported_operations": [
+            "add_scalar",
+            "sub_scalar",
+            "mul_scalar",
+            "square",
+            "polynomial",
+            "sum_reduce",
+            "mean_reduce",
+            "dot_product_public",
+        ],
         "unsupported_task_hints": UNSUPPORTED_TASK_HINTS,
     }

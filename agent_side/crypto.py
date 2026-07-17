@@ -12,6 +12,7 @@ def make_context(scheme: str, vector_size: int, depth: int):
             plain_modulus=1032193,
         )
         context.generate_relin_keys()
+        context.generate_galois_keys()
         return context, poly_mod_degree
 
     poly_mod_degree = 16384 if depth <= 4 else 32768
@@ -23,6 +24,7 @@ def make_context(scheme: str, vector_size: int, depth: int):
     )
     context.global_scale = 2**40
     context.generate_relin_keys()
+    context.generate_galois_keys()
     return context, poly_mod_degree
 
 

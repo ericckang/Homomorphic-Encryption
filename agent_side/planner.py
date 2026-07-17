@@ -53,6 +53,9 @@ Your output schema:
     {"op": "sub_scalar", "value": number},
     {"op": "mul_scalar", "value": number},
     {"op": "square"},
+    {"op": "sum_reduce"},
+    {"op": "mean_reduce"},
+    {"op": "dot_product_public", "weights": [number, number]},
     {
       "op": "polynomial",
       "terms": [{"power": positive_integer, "coefficient": number}],
@@ -66,9 +69,14 @@ Your output schema:
 
 Rules:
 - Choose BFV only for exact integer arithmetic using add/subtract/multiply by scalar.
-- Choose CKKS for floating point values, weighted/risk scores, or polynomial scoring.
-- Computation is element-wise over a vector. No sorting, branching, exact comparison,
-  min/max, median discovery, division by encrypted values, or arbitrary conditionals.
+- Choose CKKS for floating point values, weighted/risk scores, averages, or polynomial scoring.
+- This HE skill supports both vector->vector pipelines and a single final vector->scalar reduction.
+- Allowed reductions are sum_reduce, mean_reduce, and dot_product_public, and they must be the final operation.
+- Use sum_reduce for requests to sum or aggregate all encrypted values into one result.
+- Use mean_reduce for mean/average requests only with CKKS.
+- Use dot_product_public when the user provides public weights for a weighted score across the input vector.
+- No sorting, branching, exact comparison, min/max, median discovery, division by encrypted values,
+  or arbitrary conditionals.
 - For comparison requests, return a difference score such as x - threshold, not a boolean.
 - Use polynomial only when the user asks for a risk score, nonlinear score, square,
   or powers. Polynomial powers must be positive integers.

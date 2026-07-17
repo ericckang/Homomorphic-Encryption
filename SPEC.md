@@ -215,6 +215,9 @@ sub_scalar     x - c
 mul_scalar     x * c
 square         x * x
 polynomial     bounded polynomial from positive integer powers
+sum_reduce     sum an encrypted vector into one encrypted scalar
+mean_reduce    average an encrypted vector into one encrypted scalar (CKKS only)
+dot_product_public  weighted score against a public weight vector
 ```
 
 The server executes only this bounded DSL. It does not execute arbitrary code
@@ -235,6 +238,7 @@ Good fits:
 - Integer scores.
 - Count-like exact values.
 - Exact add/subtract/multiply-by-scalar pipelines.
+- Integer sum reductions.
 
 Supported DSL operations:
 
@@ -243,6 +247,7 @@ Supported DSL operations:
 - `mul_scalar`
 - `square`, with depth cost
 - `polynomial`, if coefficients and results fit the plaintext modulus
+- `sum_reduce`
 
 ### CKKS
 
@@ -254,6 +259,7 @@ Good fits:
 - Weighted numeric scores.
 - Floating-point values.
 - Bounded-depth polynomial scoring.
+- Weighted averages and vector-to-scalar reductions.
 
 Supported DSL operations:
 
@@ -262,6 +268,9 @@ Supported DSL operations:
 - `mul_scalar`
 - `square`, with depth and approximation-error cost
 - `polynomial`, with approximation error reported by the agent
+- `sum_reduce`
+- `mean_reduce`
+- `dot_product_public`
 
 ## 7. Compute Flow
 
@@ -328,6 +337,12 @@ Example inline BFV prompt:
 Compare each salary to 90000 and double the difference. data=[85000, 90000, 95000]
 ```
 
+Example inline BFV reduction prompt:
+
+```text
+Sum all salary into a scalar. data=[100, 90000, 95000]
+```
+
 Example CSV flow:
 
 ```text
@@ -350,6 +365,12 @@ Example CKKS prompt:
 
 ```text
 Compute a nonlinear medical risk score using x^8 + x^4 + x^2. data=[1.05, 1.10, 1.15]
+```
+
+Example CKKS weighted-score prompt:
+
+```text
+Compute a weighted risk score with weights [0.2, 0.3, 0.5]. data=[1.0, 2.0, 3.0]
 ```
 
 ## 9. How to Test
@@ -380,7 +401,8 @@ python3 scripts/smoke_test.py
 Expected behavior:
 
 - BFV salary-difference test decrypts exactly to `[-10000, 0, 10000]`.
-- CKKS polynomial test reports a small approximation error.
+- BFV sum-reduction test decrypts exactly to `185100`.
+- CKKS polynomial and reduction tests report small approximation error.
 - Server logs show `BLIND-EVAL` entries containing ciphertext byte previews.
 
 ### Agent Preflight Checks
@@ -418,10 +440,12 @@ system limitations.
 This project is a capstone prototype, not a production HE platform.
 
 - Inputs are limited to one numeric vector from inline data or a one-column CSV.
-- The generic operation schema is element-wise; it does not support arbitrary
-  table joins, multi-column feature matrices, or general dataframes.
+- The generic operation schema supports one encrypted vector per request plus an
+  optional final vector-to-scalar reduction; it does not support arbitrary table
+  joins, multi-column encrypted feature matrices, or general dataframes.
 - Supported operations are limited to scalar addition/subtraction/multiplication,
-  squaring, and bounded polynomials.
+  squaring, bounded polynomials, encrypted sums, encrypted means, and public-weight
+  dot products.
 - Unsupported computations include sorting, median, min/max, branching,
   boolean thresholding, encrypted division, ranking, and general classifiers.
 - Salary comparison can be demonstrated as an offset or score, but exact

@@ -15,6 +15,7 @@ from he_common.operations import (
     apply_plaintext_pipeline,
     data_profile,
     estimate_depth,
+    normalize_decrypted_result,
     sanitize_plan,
 )
 
@@ -63,7 +64,10 @@ def run_agent_task(redacted_prompt: str, data: list[float], *, reset_state: bool
     result_path = Path(server_response["result_path"])
     update_agent("decrypting", "Decrypting returned ciphertext locally.")
     t0 = time.perf_counter()
-    decrypted = decrypt_vector(context, plan["scheme"], result_path.read_bytes())
+    decrypted = normalize_decrypted_result(
+        plan,
+        decrypt_vector(context, plan["scheme"], result_path.read_bytes()),
+    )
     decryption_time = time.perf_counter() - t0
 
     expected = apply_plaintext_pipeline(data, plan["operations"])

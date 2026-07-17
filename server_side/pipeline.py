@@ -19,6 +19,14 @@ def run_pipeline(vector, params: dict, *, integer: bool) -> tuple[object, int]:
             vector = _apply_polynomial(vector, operation, integer=integer)
             term_powers = [int(term.get("power")) for term in operation.get("terms", [])]
             max_depth += max(polynomial_power_depth(power) for power in term_powers)
+        elif op == "sum_reduce":
+            vector = _sum_vector(vector)
+        elif op == "mean_reduce":
+            vector = _mean_vector(vector, integer=integer)
+            max_depth += 1
+        elif op == "dot_product_public":
+            vector = _dot_product_public(vector, operation, integer=integer)
+            max_depth += 1
         else:
             vector = _apply_basic_op(vector, operation, integer=integer)
             if op == "square":
@@ -43,6 +51,48 @@ def _apply_basic_op(vector, operation: dict, *, integer: bool):
         return vector.square()
 
     raise ValueError(f"Unsupported pipeline operation: {op}")
+
+
+def _dot_product_public(vector, operation: dict, *, integer: bool):
+    weights = operation.get("weights")
+    if not isinstance(weights, list) or not weights:
+        raise ValueError("dot_product_public requires a non-empty weights list.")
+    checked = [_require_number(weight, "dot_product_public weight", integer=integer) for weight in weights]
+
+    if hasattr(vector, "dot"):
+        return vector.dot(checked)
+    if hasattr(vector, "dot_"):
+        clone = _clone_vector(vector)
+        clone.dot_(checked)
+        return clone
+
+    product = vector * checked
+    return _sum_vector(product)
+
+
+def _mean_vector(vector, *, integer: bool):
+    if integer:
+        raise ValueError("mean_reduce is only supported for CKKS in this demo.")
+    count = vector.size()
+    if count <= 0:
+        raise ValueError("Cannot compute the mean of an empty encrypted vector.")
+    return _sum_vector(vector) * (1.0 / count)
+
+
+def _sum_vector(vector):
+    if hasattr(vector, "sum"):
+        return vector.sum()
+    if hasattr(vector, "sum_"):
+        clone = _clone_vector(vector)
+        clone.sum_()
+        return clone
+    raise ValueError("The current TenSEAL backend does not expose vector sum operations.")
+
+
+def _clone_vector(vector):
+    if hasattr(vector, "copy"):
+        return vector.copy()
+    raise ValueError("The current TenSEAL backend does not expose a safe vector copy helper.")
 
 
 def _apply_polynomial(vector, operation: dict, *, integer: bool):

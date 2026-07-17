@@ -4,7 +4,17 @@ import re
 from typing import Any
 
 
-ALLOWED_OPS = {"add_scalar", "sub_scalar", "mul_scalar", "square", "polynomial"}
+ALLOWED_OPS = {
+    "add_scalar",
+    "sub_scalar",
+    "mul_scalar",
+    "square",
+    "polynomial",
+    "sum_reduce",
+    "mean_reduce",
+    "dot_product_public",
+}
+REDUCTION_OPS = {"sum_reduce", "mean_reduce", "dot_product_public"}
 
 
 def data_profile(data: list[float]) -> dict[str, Any]:
@@ -18,21 +28,27 @@ def data_profile(data: list[float]) -> dict[str, Any]:
 
 def sanitize_plan(plan: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
     scheme = str(plan.get("scheme", "")).upper()
-    if profile["numeric_kind"] == "float":
+    requested_operations = plan.get("operations")
+    if not isinstance(requested_operations, list) or not requested_operations:
+        raise ValueError("Planner did not return any operations.")
+
+    wants_ckks = profile["numeric_kind"] == "float" or any(
+        operation.get("op") == "mean_reduce" for operation in requested_operations if isinstance(operation, dict)
+    )
+    if wants_ckks:
         scheme = "CKKS"
     if scheme not in {"BFV", "CKKS"}:
         scheme = "BFV" if profile["numeric_kind"] == "integer" else "CKKS"
 
-    operations = plan.get("operations")
-    if not isinstance(operations, list) or not operations:
-        raise ValueError("Planner did not return any operations.")
-
-    clean_ops = [_sanitize_operation(operation, scheme) for operation in operations]
+    clean_ops = [_sanitize_operation(operation, scheme, profile) for operation in requested_operations]
+    _validate_operation_order(clean_ops)
+    result_shape = _infer_result_shape(clean_ops)
     return {
         "schema_name": _safe_schema_name(plan.get("schema_name", "general_task")),
         "scheme": scheme,
         "computation_type": "general_bfv" if scheme == "BFV" else "general_ckks",
         "operations": clean_ops,
+        "result_shape": result_shape,
         "result_label": str(plan.get("result_label", "result"))[:80],
         "plaintext_formula": str(plan.get("plaintext_formula", "element-wise HE pipeline"))[:200],
         "notes": str(plan.get("notes", ""))[:300],
@@ -47,6 +63,8 @@ def estimate_depth(operations: list[dict[str, Any]]) -> int:
         elif operation["op"] == "polynomial":
             powers = [term["power"] for term in operation["terms"]]
             depth += max(polynomial_power_depth(power) for power in powers)
+        elif operation["op"] in {"mean_reduce", "dot_product_public"}:
+            depth += 1
     return depth
 
 
@@ -69,10 +87,25 @@ def apply_plaintext_pipeline(data: list[float], operations: list[dict[str, Any]]
                 + constant
                 for x in result
             ]
+        elif op == "sum_reduce":
+            result = [sum(result)]
+        elif op == "mean_reduce":
+            result = [sum(result) / len(result)]
+        elif op == "dot_product_public":
+            weights = operation["weights"]
+            result = [sum(x * weight for x, weight in zip(result, weights))]
     return result
 
 
-def _sanitize_operation(operation: Any, scheme: str) -> dict[str, Any]:
+def normalize_decrypted_result(plan: dict[str, Any], decrypted: list[float]) -> list[float]:
+    if plan.get("result_shape") != "scalar":
+        return decrypted
+    if not decrypted:
+        raise ValueError("Decrypted result is empty.")
+    return [decrypted[0]]
+
+
+def _sanitize_operation(operation: Any, scheme: str, profile: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(operation, dict):
         raise ValueError("Each planned operation must be a JSON object.")
 
@@ -86,6 +119,26 @@ def _sanitize_operation(operation: Any, scheme: str) -> dict[str, Any]:
 
     if op == "square":
         return {"op": "square"}
+
+    if op == "sum_reduce":
+        return {"op": "sum_reduce"}
+
+    if op == "mean_reduce":
+        if scheme != "CKKS":
+            raise ValueError("mean_reduce requires CKKS because this demo does not support encrypted division in BFV.")
+        return {"op": "mean_reduce"}
+
+    if op == "dot_product_public":
+        weights = _as_number_list(
+            operation.get("weights"),
+            integer=(scheme == "BFV"),
+            field="dot_product_public weights",
+        )
+        if len(weights) != profile["vector_length"]:
+            raise ValueError(
+                "dot_product_public weights must match the encrypted vector length known to the agent."
+            )
+        return {"op": "dot_product_public", "weights": weights}
 
     terms = operation.get("terms")
     if not isinstance(terms, list) or not terms:
@@ -111,6 +164,12 @@ def _as_number(value: Any, *, integer: bool) -> int | float:
     return float(value)
 
 
+def _as_number_list(value: Any, *, integer: bool, field: str) -> list[int] | list[float]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{field} must be a non-empty list of numbers.")
+    return [_as_number(item, integer=integer) for item in value]
+
+
 def polynomial_power_depth(power: int) -> int:
     """
     Minimal multiplicative depth for x^power using exponentiation by squaring.
@@ -133,3 +192,19 @@ def _as_positive_int(value: Any, *, field: str) -> int:
 def _safe_schema_name(value: Any) -> str:
     name = re.sub(r"[^a-zA-Z0-9_]+", "_", str(value).strip().lower()).strip("_")
     return name[:60] or "general_task"
+
+
+def _infer_result_shape(operations: list[dict[str, Any]]) -> str:
+    if operations and operations[-1]["op"] in REDUCTION_OPS:
+        return "scalar"
+    return "vector"
+
+
+def _validate_operation_order(operations: list[dict[str, Any]]) -> None:
+    reductions = [idx for idx, operation in enumerate(operations) if operation["op"] in REDUCTION_OPS]
+    if not reductions:
+        return
+    if len(reductions) > 1:
+        raise ValueError("Only one reduction operation is allowed per plan.")
+    if reductions[0] != len(operations) - 1:
+        raise ValueError("Reduction operations must be the final step in the HE pipeline.")

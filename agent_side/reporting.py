@@ -14,21 +14,32 @@ def print_report(
     timings: dict[str, float],
     poly_mod_degree: int,
 ) -> dict[str, Any]:
-    sample_count = min(5, len(decrypted))
-    samples = [
-        {
-            "index": idx,
-            "input": original_data[idx],
-            "expected": expected[idx],
-            "decrypted": decrypted[idx],
-        }
-        for idx in range(sample_count)
-    ]
+    if plan.get("result_shape") == "scalar":
+        samples = [
+            {
+                "index": "scalar",
+                "input": f"{len(original_data)} encrypted values",
+                "expected": expected[0],
+                "decrypted": decrypted[0],
+            }
+        ]
+    else:
+        sample_count = min(5, len(decrypted))
+        samples = [
+            {
+                "index": idx,
+                "input": original_data[idx],
+                "expected": expected[idx],
+                "decrypted": decrypted[idx],
+            }
+            for idx in range(sample_count)
+        ]
 
     result_summary = {
         "schema_name": plan["schema_name"],
         "scheme": plan["scheme"],
         "computation_type": plan["computation_type"],
+        "result_shape": plan.get("result_shape", "vector"),
         "formula": plan["plaintext_formula"],
         "notes": plan["notes"],
         "vector_length": len(original_data),
@@ -40,6 +51,8 @@ def print_report(
         "decryption_time_sec": timings["decryption"],
         "server_audit": server_response["audit"],
         "samples": samples,
+        "expected_output": expected,
+        "decrypted_output": decrypted,
     }
     print("\n" + "=" * 72)
     print("Generalized HE Agent Result")
@@ -50,6 +63,7 @@ def print_report(
     if plan["notes"]:
         print(f"Planner notes      : {plan['notes']}")
     print(f"Vector length      : {len(original_data)}")
+    print(f"Result shape       : {plan.get('result_shape', 'vector')}")
     print(f"Poly modulus degree: {poly_mod_degree}")
     print(f"Ciphertext size    : {server_response['_payload_size_kb']:.2f} KB")
     print(f"Encryption time    : {timings['encryption']:.4f} sec")
@@ -61,8 +75,8 @@ def print_report(
     print("\nResult sample")
     for sample in samples:
         print(
-            f"  [{sample['index']}] input={sample['input']:.6g} "
-            f"expected={sample['expected']:.6g} decrypted={sample['decrypted']:.6g}"
+            f"  [{sample['index']}] input={_format_value(sample['input'])} "
+            f"expected={_format_value(sample['expected'])} decrypted={_format_value(sample['decrypted'])}"
         )
 
     if plan["scheme"] == "CKKS":
@@ -77,3 +91,9 @@ def print_report(
 
     update_result(result_summary)
     return result_summary
+
+
+def _format_value(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return f"{value:.6g}"
+    return str(value)

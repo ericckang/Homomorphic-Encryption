@@ -170,7 +170,7 @@ python server.py
 export AZURE_OPENAI_KEY=\"&lt;your-key&gt;\"
 python agent.py</pre>
       <div class=\"muted\">Example prompt for the agent:</div>
-      <pre>Compare each salary to 90000 and double the difference. data=[85000, 90000, 95000]</pre>
+      <pre>Sum all salary into a scalar. data=[100, 90000, 95000]</pre>
     </section>
 
     <section class=\"card\">
@@ -319,7 +319,16 @@ def health() -> dict:
 def capabilities() -> dict:
     return {
         "schemes": ["BFV", "CKKS"],
-        "operations": ["add_scalar", "sub_scalar", "mul_scalar", "square", "polynomial"],
+        "operations": [
+            "add_scalar",
+            "sub_scalar",
+            "mul_scalar",
+            "square",
+            "polynomial",
+            "sum_reduce",
+            "mean_reduce",
+            "dot_product_public",
+        ],
     }
 
 

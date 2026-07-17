@@ -242,10 +242,10 @@ def agent_dashboard() -> str:
       <div class=\"muted\">If the request exceeds local limits, the agent will block it before anything is sent to the server.</div>
 
       <label for=\"task-prompt\">Task prompt</label>
-      <textarea id=\"task-prompt\">Compare each salary to 90000 and double the difference. data=[85000, 90000, 95000]</textarea>
+      <textarea id=\"task-prompt\">Sum all salary into a scalar. data=[100, 90000, 95000]</textarea>
 
       <label for=\"manual-values\">Manual values, if not included in prompt</label>
-      <input id=\"manual-values\" placeholder=\"[85000, 90000, 95000]\" />
+      <input id=\"manual-values\" placeholder=\"[100, 90000, 95000]\" />
 
       <label for=\"csv-file\">CSV upload</label>
       <input id=\"csv-file\" type=\"file\" accept=\".csv,text/csv\" />

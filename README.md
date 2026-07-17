@@ -42,8 +42,8 @@ can execute.
 
 | Scheme | Operation style |
 |--------|-----------------|
-| `BFV` | exact integer element-wise pipelines |
-| `CKKS` | approximate real-number element-wise pipelines, including bounded polynomials |
+| `BFV` | exact integer vector pipelines, including integer reductions such as `sum_reduce` |
+| `CKKS` | approximate real-number vector pipelines, including bounded polynomials and reductions such as `mean_reduce` / `dot_product_public` |
 
 ## Setup
 
@@ -118,6 +118,16 @@ You can include data inline:
 Compare each salary to 90000 and double the difference. data=[85000, 90000, 95000]
 ```
 
+Or request an encrypted reduction directly:
+
+```text
+Sum all salary into a scalar. data=[100, 90000, 95000]
+```
+
+```text
+Compute a weighted risk score with weights [0.2, 0.3, 0.5]. data=[1.0, 2.0, 3.0]
+```
+
 Or leave the data out and use the manual values or CSV upload field:
 
 ```text
@@ -157,11 +167,12 @@ python3 agent.py --cli
 The LLM receives only the task text with raw data redacted plus basic metadata
 like vector length and integer-vs-float type. It returns a JSON operation schema
 using a bounded DSL (`add_scalar`, `sub_scalar`, `mul_scalar`, `square`,
-`polynomial`). The agent encrypts locally, sends the schema plus ciphertext to
-the compute service, decrypts the returned ciphertext, and prints result samples,
-performance, and CKKS approximation error when applicable. Watch the server log:
-every request logs a `BLIND-EVAL` line with the ciphertext size and a hex preview
-— the proof that the server only ever sees gibberish.
+`polynomial`, `sum_reduce`, `mean_reduce`, `dot_product_public`). The agent
+encrypts locally, sends the schema plus ciphertext to the compute service,
+decrypts the returned ciphertext, and prints result samples, performance, and
+CKKS approximation error when applicable. Watch the server log: every request
+logs a `BLIND-EVAL` line with the ciphertext size and a hex preview — the proof
+that the server only ever sees gibberish.
 
 Before encryption, the agent runs preflight checks for unsupported tasks,
 excessive multiplication depth, large input vectors, and estimated payload size.
@@ -188,7 +199,8 @@ python3 scripts/smoke_test.py
 ```
 
 The smoke test sends fixed BFV and CKKS operation schemas directly to the
-server. It verifies exact BFV decryption and bounded CKKS approximation error.
+server. It verifies exact BFV decryption, BFV integer reduction, and bounded
+CKKS approximation error for both polynomial and reduction workloads.
 
 Run the HE boundary benchmark:
 
@@ -222,4 +234,6 @@ The server reads optional environment variables (all have defaults):
 - `poly_modulus_degree` sets both security and capacity: larger degree = more
   multiplicative depth and more SIMD slots, but quadratically larger/slower ciphertexts.
   A ciphertext holds at most `degree` (BFV) or `degree/2` (CKKS) values per request.
-- Galois keys are intentionally omitted (no slot rotations are used) to keep contexts small.
+- Galois keys are included so the server can run slot-rotation-based reductions
+  such as encrypted sums and weighted dot products. They increase context size
+  compared with the original element-wise-only demo.
