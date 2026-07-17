@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from he_common.operations import polynomial_power_depth
+
 
 def run_pipeline(vector, params: dict, *, integer: bool) -> tuple[object, int]:
     operations = params.get("operations")
@@ -16,7 +18,7 @@ def run_pipeline(vector, params: dict, *, integer: bool) -> tuple[object, int]:
         if op == "polynomial":
             vector = _apply_polynomial(vector, operation, integer=integer)
             term_powers = [int(term.get("power")) for term in operation.get("terms", [])]
-            max_depth += max(power.bit_length() - 1 for power in term_powers)
+            max_depth += max(polynomial_power_depth(power) for power in term_powers)
         else:
             vector = _apply_basic_op(vector, operation, integer=integer)
             if op == "square":
@@ -48,30 +50,17 @@ def _apply_polynomial(vector, operation: dict, *, integer: bool):
     if not isinstance(terms, list) or not terms:
         raise ValueError("polynomial operation requires a non-empty terms list.")
 
-    allowed_powers = {1, 2, 4, 8, 16}
-    max_power = max(int(term.get("power")) for term in terms)
-    if max_power not in allowed_powers:
-        raise ValueError("polynomial powers must be one of 1, 2, 4, 8, 16.")
-
     powers = {1: vector}
-    current = vector
-    for power in [2, 4, 8, 16]:
-        if power > max_power:
-            break
-        current = current.square()
-        powers[power] = current
 
     result = None
     for idx, term in enumerate(terms, start=1):
-        power = int(term.get("power"))
-        if power not in allowed_powers:
-            raise ValueError(f"term {idx} uses unsupported power {power}.")
+        power = _require_positive_int(term.get("power"), f"term {idx} power")
         coefficient = _require_number(
             term.get("coefficient", 1),
             f"term {idx} coefficient",
             integer=integer,
         )
-        contribution = powers[power] * coefficient
+        contribution = _power_vector(vector, power, powers) * coefficient
         result = contribution if result is None else result + contribution
 
     constant = operation.get("constant", 0)
@@ -88,6 +77,32 @@ def _require_number(value, field: str, *, integer: bool = False):
     if integer and not float(value).is_integer():
         raise ValueError(f"{field} must be an integer for BFV.")
     return int(value) if integer else float(value)
+
+
+def _require_positive_int(value, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a positive integer.")
+    if not float(value).is_integer():
+        raise ValueError(f"{field} must be a positive integer.")
+    result = int(value)
+    if result <= 0:
+        raise ValueError(f"{field} must be >= 1.")
+    return result
+
+
+def _power_vector(vector, exponent: int, cache: dict[int, object]):
+    if exponent in cache:
+        return cache[exponent]
+
+    if exponent % 2 == 0:
+        half = _power_vector(vector, exponent // 2, cache)
+        cache[exponent] = half.square()
+        return cache[exponent]
+
+    lower = exponent // 2
+    upper = exponent - lower
+    cache[exponent] = _power_vector(vector, lower, cache) * _power_vector(vector, upper, cache)
+    return cache[exponent]
 
 
 def _scalar_vector(vector, value):

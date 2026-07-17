@@ -5,7 +5,6 @@ from typing import Any
 
 
 ALLOWED_OPS = {"add_scalar", "sub_scalar", "mul_scalar", "square", "polynomial"}
-ALLOWED_POWERS = {1, 2, 4, 8, 16}
 
 
 def data_profile(data: list[float]) -> dict[str, Any]:
@@ -47,7 +46,7 @@ def estimate_depth(operations: list[dict[str, Any]]) -> int:
             depth += 1
         elif operation["op"] == "polynomial":
             powers = [term["power"] for term in operation["terms"]]
-            depth += max(power.bit_length() - 1 for power in powers)
+            depth += max(polynomial_power_depth(power) for power in powers)
     return depth
 
 
@@ -94,9 +93,7 @@ def _sanitize_operation(operation: Any, scheme: str) -> dict[str, Any]:
 
     clean_terms = []
     for term in terms:
-        power = int(term.get("power"))
-        if power not in ALLOWED_POWERS:
-            raise ValueError(f"Unsupported polynomial power: {power}")
+        power = _as_positive_int(term.get("power"), field="polynomial power")
         coefficient = _as_number(term.get("coefficient", 1), integer=(scheme == "BFV"))
         clean_terms.append({"power": power, "coefficient": coefficient})
 
@@ -112,6 +109,25 @@ def _as_number(value: Any, *, integer: bool) -> int | float:
             raise ValueError("BFV operations must use integer scalar values.")
         return int(value)
     return float(value)
+
+
+def polynomial_power_depth(power: int) -> int:
+    """
+    Minimal multiplicative depth for x^power using exponentiation by squaring.
+    """
+    validated = _as_positive_int(power, field="polynomial power")
+    return (validated - 1).bit_length()
+
+
+def _as_positive_int(value: Any, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a positive integer.")
+    if not float(value).is_integer():
+        raise ValueError(f"{field} must be a positive integer.")
+    result = int(value)
+    if result <= 0:
+        raise ValueError(f"{field} must be >= 1.")
+    return result
 
 
 def _safe_schema_name(value: Any) -> str:

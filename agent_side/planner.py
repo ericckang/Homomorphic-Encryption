@@ -55,7 +55,7 @@ Your output schema:
     {"op": "square"},
     {
       "op": "polynomial",
-      "terms": [{"power": 1|2|4|8|16, "coefficient": number}],
+      "terms": [{"power": positive_integer, "coefficient": number}],
       "constant": number
     }
   ],
@@ -71,8 +71,8 @@ Rules:
   min/max, median discovery, division by encrypted values, or arbitrary conditionals.
 - For comparison requests, return a difference score such as x - threshold, not a boolean.
 - Use polynomial only when the user asks for a risk score, nonlinear score, square,
-  or powers. Allowed powers are exactly 1, 2, 4, 8, 16.
-- Keep multiplicative depth practical; prefer powers <= 8 unless the task clearly asks deeper.
+  or powers. Polynomial powers must be positive integers.
+- Keep multiplicative depth practical; prefer shallow powers unless the task clearly asks deeper.
 - computation_type must match the scheme: BFV -> general_bfv, CKKS -> general_ckks.
 """.strip()
 

@@ -214,7 +214,7 @@ add_scalar     x + c
 sub_scalar     x - c
 mul_scalar     x * c
 square         x * x
-polynomial     bounded polynomial from powers 1, 2, 4, 8, 16
+polynomial     bounded polynomial from positive integer powers
 ```
 
 The server executes only this bounded DSL. It does not execute arbitrary code

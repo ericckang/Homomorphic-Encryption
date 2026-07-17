@@ -55,15 +55,15 @@ def run_ckks_test() -> None:
                 {
                     "op": "polynomial",
                     "terms": [
-                        {"power": 8, "coefficient": 1.0},
-                        {"power": 4, "coefficient": 1.0},
+                        {"power": 5, "coefficient": 1.0},
+                        {"power": 3, "coefficient": 1.0},
                         {"power": 2, "coefficient": 1.0},
                     ],
                     "constant": 0.0,
                 }
             ],
             "result_label": "risk score",
-            "plaintext_formula": "x^8 + x^4 + x^2",
+            "plaintext_formula": "x^5 + x^3 + x^2",
         },
         data_profile(data),
     )
