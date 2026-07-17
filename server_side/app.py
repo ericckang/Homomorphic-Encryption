@@ -201,43 +201,21 @@ python agent.py</pre>
     </section>
 
     <section class=\"card\">
-      <div class=\"label\">Result</div>
-      <div class=\"value\" id=\"result-title\">No result yet</div>
-      <div class=\"muted\" id=\"result-summary\"></div>
+      <div class=\"label\">Privacy Boundary</div>
+      <div class=\"value\" id=\"privacy-title\">Server never decrypts</div>
+      <div class=\"muted\" id=\"privacy-summary\">This untrusted node can audit ciphertext size and evaluate the requested schema, but decrypted values remain on the trusted agent side.</div>
       <table class=\"kv-table\">
         <tbody>
-          <tr><td>Vector Length</td><td id=\"result-vector-length\">-</td></tr>
-          <tr><td>Poly Modulus Degree</td><td id=\"result-poly-degree\">-</td></tr>
-          <tr><td>Encryption Time (sec)</td><td id=\"result-encryption\">-</td></tr>
-          <tr><td>Server Eval Time (sec)</td><td id=\"result-evaluation\">-</td></tr>
-          <tr><td>Round-trip Time (sec)</td><td id=\"result-roundtrip\">-</td></tr>
-          <tr><td>Decryption Time (sec)</td><td id=\"result-decryption\">-</td></tr>
-          <tr><td>CKKS Max Abs Error</td><td id=\"result-max-error\">-</td></tr>
-          <tr><td>BFV Exact Mismatches</td><td id=\"result-mismatches\">-</td></tr>
-        </tbody>
-      </table>
-    </section>
-  </div>
-
-  <div class=\"grid\">
-    <section class=\"card\">
-      <div class=\"label\">Sample Outputs</div>
-      <table>
-        <thead>
-          <tr><th>Index</th><th>Input</th><th>Expected</th><th>Decrypted</th></tr>
-        </thead>
-        <tbody id=\"samples-body\">
-          <tr><td colspan=\"4\" class=\"muted\">No samples yet</td></tr>
+          <tr><td>Secret Key Present</td><td>No</td></tr>
+          <tr><td>Decrypted Result Visible Here</td><td>No</td></tr>
+          <tr><td>Trusted Decryption Location</td><td>Agent UI on port 8081</td></tr>
+          <tr><td>Server Eval Time (sec)</td><td id=\"server-evaluation-time\">-</td></tr>
         </tbody>
       </table>
     </section>
   </div>
 
   <script>
-    function pretty(obj) {
-      return JSON.stringify(obj ?? {}, null, 2);
-    }
-
     function setText(id, value) {
       document.getElementById(id).textContent = value;
     }
@@ -315,31 +293,7 @@ python agent.py</pre>
       setText('server-scheme', data.server?.last_request?.scheme ?? '-');
       setText('server-payload-kb', data.server?.last_request?.payload_kb ?? '-');
       setText('server-hex-preview', hexPreview);
-
-      const result = agentStage === 'done' ? data.result : null;
-      setText('result-title', result ? `${result.schema_name} (${result.scheme})` : 'Waiting for decryption');
-      setText('result-summary', result ? result.formula : 'Waiting for agent decryption...');
-      setText('result-vector-length', result?.vector_length ?? '-');
-      setText('result-poly-degree', result?.poly_modulus_degree ?? '-');
-      setText('result-encryption', result?.encryption_time_sec ?? '-');
-      setText('result-evaluation', result?.evaluation_time_sec ?? '-');
-      setText('result-roundtrip', result?.roundtrip_time_sec ?? '-');
-      setText('result-decryption', result?.decryption_time_sec ?? '-');
-      setText('result-max-error', result?.scheme === 'CKKS' ? (result?.max_abs_error ?? '-') : 'N/A');
-      setText('result-mismatches', result?.scheme === 'BFV' ? (result?.exact_mismatches ?? '-') : 'N/A');
-
-      const tbody = document.getElementById('samples-body');
-      const samples = result?.samples || [];
-      tbody.innerHTML = samples.length
-        ? samples.map(sample => `
-            <tr>
-              <td>${sample.index}</td>
-              <td>${sample.input}</td>
-              <td>${sample.expected}</td>
-              <td>${sample.decrypted}</td>
-            </tr>
-          `).join('')
-        : '<tr><td colspan="4" class="muted">No samples yet</td></tr>';
+      setText('server-evaluation-time', data.server?.last_request?.evaluation_time_sec ?? '-');
 
     }
 
