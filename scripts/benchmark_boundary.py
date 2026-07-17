@@ -23,6 +23,7 @@ HARD_2GB = 1_900_000_000  # mirrors the server's HE_MAX_PAYLOAD_BYTES guard
 def bfv_ctx(deg):
     c = ts.context(ts.SCHEME_TYPE.BFV, poly_modulus_degree=deg, plain_modulus=1032193)
     c.generate_relin_keys()
+    c.generate_galois_keys()
     return c
 
 
@@ -30,6 +31,7 @@ def ckks_ctx(deg, coeff):
     c = ts.context(ts.SCHEME_TYPE.CKKS, poly_modulus_degree=deg, coeff_mod_bit_sizes=coeff)
     c.global_scale = 2 ** 40
     c.generate_relin_keys()
+    c.generate_galois_keys()
     return c
 
 
@@ -75,7 +77,7 @@ def boundary_2_serialization():
 
 
 def boundary_3_context_size():
-    print("\n### BOUNDARY 3 — Context size vs poly_modulus_degree (degree-valid chains)")
+    print("\n### BOUNDARY 3 — Context size vs poly_modulus_degree (with Galois keys for reductions)")
     print(f"{'degree':>7} {'chain (bits)':>16} {'context_MB':>11}")
     for deg, coeff in [(4096, [40, 28, 40]), (8192, [50, 30, 30, 50]),
                        (16384, [60, 40, 40, 40, 40, 60]), (32768, [60, 40, 40, 40, 40, 40, 60])]:
@@ -171,9 +173,111 @@ def boundary_5_runtime_scaling():
         gc.collect()
 
 
+def boundary_6_reduction_scaling():
+    print("\n### BOUNDARY 6 — Reduction workloads enabled by Galois keys")
+    print("Measures vector-to-scalar reductions and public-weight scoring.\n")
+
+    print("BFV reduction workload: sum_reduce(x)")
+    print(f"{'batch':>7} {'payload_MB':>11} {'encrypt_s':>10} {'eval_s':>10} {'decrypt_s':>10}")
+    for batch in [16, 128, 1024, 4096, 8192]:
+        ctx = bfv_ctx(4096 if batch <= 4096 else 8192)
+        data = [i % 2 for i in range(batch)]
+
+        t0 = time.perf_counter()
+        encrypted = ts.bfv_vector(ctx, data)
+        encrypt_s = time.perf_counter() - t0
+        payload_mb = len(encrypted.serialize()) / 1024 / 1024
+
+        try:
+            t0 = time.perf_counter()
+            result = encrypted.sum()
+            eval_s = time.perf_counter() - t0
+
+            t0 = time.perf_counter()
+            decrypted = result.decrypt()
+            decrypt_s = time.perf_counter() - t0
+
+            expected = sum(data)
+            err = abs(expected - decrypted[0])
+            if err != 0:
+                raise RuntimeError(
+                    f"BFV sum_reduce mismatch at batch {batch}: expected {expected}, got {decrypted[0]}"
+                )
+
+            print(f"{batch:>7} {payload_mb:>11.2f} {encrypt_s:>10.4f} {eval_s:>10.4f} {decrypt_s:>10.4f}")
+            del result
+        except Exception as exc:
+            print(f"{batch:>7} {payload_mb:>11.2f} {encrypt_s:>10.4f} {'LIMIT':>10} {'-':>10}  # {str(exc).splitlines()[0]}")
+            del ctx, encrypted
+            gc.collect()
+            break
+        del ctx, encrypted
+        gc.collect()
+
+    print("\nCKKS reduction workload: mean_reduce(x)")
+    print(f"{'batch':>7} {'payload_MB':>11} {'encrypt_s':>10} {'eval_s':>10} {'decrypt_s':>10} {'abs_error':>11}")
+    for batch in [16, 128, 1024, 4096]:
+        ctx = ckks_ctx(16384, [60, 40, 40, 40, 40, 60])
+        data = [1.0 + (i % 200) * 0.01 for i in range(batch)]
+
+        t0 = time.perf_counter()
+        encrypted = ts.ckks_vector(ctx, data)
+        encrypt_s = time.perf_counter() - t0
+        payload_mb = len(encrypted.serialize()) / 1024 / 1024
+
+        t0 = time.perf_counter()
+        result = encrypted.sum() * (1.0 / len(data))
+        eval_s = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        decrypted = result.decrypt()
+        decrypt_s = time.perf_counter() - t0
+
+        expected = sum(data) / len(data)
+        abs_error = abs(expected - decrypted[0])
+
+        print(
+            f"{batch:>7} {payload_mb:>11.2f} {encrypt_s:>10.4f} "
+            f"{eval_s:>10.4f} {decrypt_s:>10.4f} {abs_error:>11.6f}"
+        )
+        del ctx, encrypted, result
+        gc.collect()
+
+    print("\nCKKS weighted workload: dot_product_public(x, w)")
+    print(f"{'batch':>7} {'payload_MB':>11} {'encrypt_s':>10} {'eval_s':>10} {'decrypt_s':>10} {'abs_error':>11}")
+    for batch in [16, 128, 1024, 4096]:
+        ctx = ckks_ctx(16384, [60, 40, 40, 40, 40, 60])
+        data = [1.0 + (i % 100) * 0.02 for i in range(batch)]
+        weights = [0.1 + ((i % 5) * 0.05) for i in range(batch)]
+
+        t0 = time.perf_counter()
+        encrypted = ts.ckks_vector(ctx, data)
+        encrypt_s = time.perf_counter() - t0
+        payload_mb = len(encrypted.serialize()) / 1024 / 1024
+
+        t0 = time.perf_counter()
+        result = encrypted.dot(weights)
+        eval_s = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        decrypted = result.decrypt()
+        decrypt_s = time.perf_counter() - t0
+
+        expected = sum(x * w for x, w in zip(data, weights))
+        abs_error = abs(expected - decrypted[0])
+
+        print(
+            f"{batch:>7} {payload_mb:>11.2f} {encrypt_s:>10.4f} "
+            f"{eval_s:>10.4f} {decrypt_s:>10.4f} {abs_error:>11.6f}"
+        )
+        del ctx, encrypted, result
+        gc.collect()
+
+
 if __name__ == "__main__":
     boundary_1_slots()
     boundary_2_serialization()
     boundary_3_context_size()
     boundary_4_depth()
     boundary_5_runtime_scaling()
+    boundary_6_reduction_scaling()

@@ -15,12 +15,18 @@ HE prototype works, where cost grows, and which limits are hard constraints.
 - HE computation is practical for small demo vectors and bounded arithmetic.
 - BFV is fast and exact for integer scalar arithmetic.
 - CKKS supports real-number scoring, but results are approximate.
+- Enabling reduction workloads requires Galois keys, which significantly
+  increases public-context size.
 - Data size does not grow linearly inside one ciphertext slot capacity because
   BFV/CKKS use batching/SIMD-style packing.
 - Once vector length exceeds slot capacity, TenSEAL auto-splits into multiple
   ciphertexts and payload size grows roughly linearly.
 - Multiplicative depth is the most important hard limit for CKKS polynomial
   scoring. Too many chained multiplications eventually fail.
+- CKKS reductions (`mean_reduce`, `dot_product_public`) are materially slower
+  than shallow element-wise arithmetic because they rely on slot rotations.
+- BFV `sum_reduce` works for small exact count-style batches, but in this
+  TenSEAL setup it also hits a rotation-step limit before large batches.
 - The server rejects very large payloads before TenSEAL's approximate 2 GB
   serialization boundary.
 
@@ -66,6 +72,61 @@ approximate real-number arithmetic and deeper polynomial parameters. Within
 slot capacity, increasing the vector size has little runtime impact. The error
 stays small for this shallow polynomial.
 
+Representative reduction workloads:
+
+BFV reduction workload:
+
+```text
+sum_reduce(x)
+```
+
+This models exact integer aggregation, such as encrypted counts or bounded
+small-value totals.
+
+| Batch Size | Payload MB | Encrypt Sec | Eval Sec | Decrypt Sec |
+|-----------:|-----------:|------------:|---------:|------------:|
+| 16 | 0.08 | 0.0008 | 0.0015 | 0.0002 |
+| 128 | 0.08 | 0.0008 | 0.0026 | 0.0002 |
+| 1,024 | 0.08 | 0.0009 | 0.0037 | 0.0002 |
+| 4,096 | 0.08 | limit | - | - |
+
+Interpretation: the reduction itself is notably more expensive than the simple
+BFV offset workload because it needs slot rotations. In this TenSEAL version,
+BFV `sum()` also hits `step count too large` at batch 4,096 for the benchmarked
+parameters, so exact integer reduction has a library-level limit before the
+payload-size limit.
+
+CKKS reduction workload:
+
+```text
+mean_reduce(x)
+```
+
+| Batch Size | Payload MB | Encrypt Sec | Eval Sec | Decrypt Sec | Abs Error |
+|-----------:|-----------:|------------:|---------:|------------:|----------:|
+| 16 | 1.01 | 0.0066 | 0.0240 | 0.0020 | 0.000002 |
+| 128 | 1.00 | 0.0068 | 0.0398 | 0.0021 | 0.000002 |
+| 1,024 | 1.00 | 0.0066 | 0.0562 | 0.0020 | 0.000003 |
+| 4,096 | 1.00 | 0.0067 | 0.0675 | 0.0020 | 0.000003 |
+
+CKKS weighted-score workload:
+
+```text
+dot_product_public(x, w)
+```
+
+| Batch Size | Payload MB | Encrypt Sec | Eval Sec | Decrypt Sec | Abs Error |
+|-----------:|-----------:|------------:|---------:|------------:|----------:|
+| 16 | 1.00 | 0.0065 | 0.0183 | 0.0019 | 0.000008 |
+| 128 | 1.01 | 0.0066 | 0.0301 | 0.0019 | 0.000067 |
+| 1,024 | 1.00 | 0.0065 | 0.0418 | 0.0019 | 0.000575 |
+| 4,096 | 1.00 | 0.0067 | 0.0498 | 0.0020 | 0.002343 |
+
+Interpretation: CKKS reductions stay well within acceptable error for demo-scale
+aggregation, but they cost several times more evaluation time than the shallow
+polynomial benchmark. Dot-product error grows with vector length because more
+terms are accumulated into one approximate result.
+
 ## 3. Slot Capacity and Payload Growth
 
 TenSEAL packs many values into one ciphertext. The slot capacity is a soft
@@ -102,7 +163,9 @@ This prevents requests near TenSEAL's approximate 2 GB serialization ceiling.
 
 Interpretation: the hard payload limit is large compared with the live demo
 sizes, but it matters for realistic datasets. The agent preflight estimates
-payload size before encrypting.
+payload size before encrypting. These numbers are largely unaffected by adding
+reductions, because the payload is still dominated by ciphertext size rather
+than the operation schema.
 
 ## 5. Context Size Cost
 
@@ -111,13 +174,15 @@ size.
 
 | Degree | Coefficient Chain Bits | Public Context MB |
 |-------:|-----------------------:|------------------:|
-| 4,096 | 108 | 0.39 |
-| 8,192 | 160 | 1.47 |
-| 16,384 | 280 | 7.54 |
-| 32,768 | 320 | 20.22 |
+| 4,096 | 108 | 6.24 |
+| 8,192 | 160 | 28.06 |
+| 16,384 | 280 | 171.41 |
+| 32,768 | 320 | 506.34 |
 
-Interpretation: deeper CKKS workloads require larger parameters. That makes the
-public context heavier before any data is encrypted.
+Interpretation: deeper CKKS workloads require larger parameters. With Galois
+keys enabled for reductions, the public context becomes much heavier than the
+original element-wise-only benchmark. This is the main cost of supporting
+`sum_reduce`, `mean_reduce`, and `dot_product_public`.
 
 ## 6. CKKS Multiplicative Depth
 
@@ -139,11 +204,14 @@ The current system is intentionally bounded so that generalization stays safe
 and explainable.
 
 - Input format is one numeric vector, either inline or from a one-column CSV.
-- Server computation is element-wise over encrypted vectors.
+- Server computation supports vector pipelines plus one final vector-to-scalar
+  reduction.
 - Supported operations are `add_scalar`, `sub_scalar`, `mul_scalar`, `square`,
-  and bounded `polynomial`.
+  bounded `polynomial`, `sum_reduce`, `mean_reduce`, and `dot_product_public`.
 - BFV supports exact integer arithmetic but not real numbers.
 - CKKS supports real-number arithmetic but only approximately.
+- BFV exact aggregation must still stay within plaintext-modulus and library
+  rotation limits; large-value totals are not a good fit for the current setup.
 - Unsupported tasks include sorting, median, min/max, encrypted comparison,
   branching, encrypted division, ranking, and arbitrary classifiers.
 - Salary comparison is represented as salary offset or scoring, not a true
@@ -160,10 +228,9 @@ Suggested short explanation:
 
 ```text
 The benchmark shows that HE cost is dominated by scheme choice, parameter size,
-slot capacity, and multiplication depth. Small vector demos run quickly because
-many values are packed into one ciphertext. Payload size grows once we exceed
-slot capacity, and CKKS polynomial depth is the main hard limit because each
-multiplication consumes part of the modulus chain. Our agent checks these limits
-before sending work to the server.
+slot capacity, Galois-key context size, and multiplication depth. Small vector
+demos run quickly because many values are packed into one ciphertext. Payload
+size grows once we exceed slot capacity, CKKS polynomial depth is the main hard
+limit for nonlinear scoring, and reduction workloads are slower because they use
+slot rotations. Our agent checks these limits before sending work to the server.
 ```
-
