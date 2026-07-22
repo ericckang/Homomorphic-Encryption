@@ -8,6 +8,9 @@ ALLOWED_OPS = {
     "add_scalar",
     "sub_scalar",
     "mul_scalar",
+    "add_encrypted_scalar",
+    "sub_encrypted_scalar",
+    "mul_encrypted_scalar",
     "square",
     "polynomial",
     "sum_reduce",
@@ -43,7 +46,7 @@ def sanitize_plan(plan: dict[str, Any], profile: dict[str, Any]) -> dict[str, An
     clean_ops = [_sanitize_operation(operation, scheme, profile) for operation in requested_operations]
     _validate_operation_order(clean_ops)
     result_shape = _infer_result_shape(clean_ops)
-    return {
+    sanitized_plan = {
         "schema_name": _safe_schema_name(plan.get("schema_name", "general_task")),
         "scheme": scheme,
         "computation_type": "general_bfv" if scheme == "BFV" else "general_ckks",
@@ -53,6 +56,8 @@ def sanitize_plan(plan: dict[str, Any], profile: dict[str, Any]) -> dict[str, An
         "plaintext_formula": str(plan.get("plaintext_formula", "element-wise HE pipeline"))[:200],
         "notes": str(plan.get("notes", ""))[:300],
     }
+    sanitized_plan["server_display_formula"] = build_server_display_formula(sanitized_plan)
+    return sanitized_plan
 
 
 def estimate_depth(operations: list[dict[str, Any]]) -> int:
@@ -77,6 +82,12 @@ def apply_plaintext_pipeline(data: list[float], operations: list[dict[str, Any]]
         elif op == "sub_scalar":
             result = [x - operation["value"] for x in result]
         elif op == "mul_scalar":
+            result = [x * operation["value"] for x in result]
+        elif op == "add_encrypted_scalar":
+            result = [x + operation["value"] for x in result]
+        elif op == "sub_encrypted_scalar":
+            result = [x - operation["value"] for x in result]
+        elif op == "mul_encrypted_scalar":
             result = [x * operation["value"] for x in result]
         elif op == "square":
             result = [x * x for x in result]
@@ -113,9 +124,22 @@ def _sanitize_operation(operation: Any, scheme: str, profile: dict[str, Any]) ->
     if op not in ALLOWED_OPS:
         raise ValueError(f"Unsupported planned operation: {op}")
 
-    if op in {"add_scalar", "sub_scalar", "mul_scalar"}:
+    if op in {
+        "add_scalar",
+        "sub_scalar",
+        "mul_scalar",
+        "add_encrypted_scalar",
+        "sub_encrypted_scalar",
+        "mul_encrypted_scalar",
+    }:
         value = _as_number(operation.get("value"), integer=(scheme == "BFV"))
-        return {"op": op, "value": value}
+        clean_operation = {"op": op, "value": value}
+        if op in {"add_encrypted_scalar", "sub_encrypted_scalar", "mul_encrypted_scalar"}:
+            operand_key = operation.get("operand_key")
+            if not isinstance(operand_key, str) or not operand_key.strip():
+                raise ValueError(f"{op} requires a non-empty operand_key.")
+            clean_operation["operand_key"] = operand_key.strip()
+        return clean_operation
 
     if op == "square":
         return {"op": "square"}
@@ -208,3 +232,47 @@ def _validate_operation_order(operations: list[dict[str, Any]]) -> None:
         raise ValueError("Only one reduction operation is allowed per plan.")
     if reductions[0] != len(operations) - 1:
         raise ValueError("Reduction operations must be the final step in the HE pipeline.")
+
+
+def build_server_display_formula(plan: dict[str, Any]) -> str:
+    expression = "x"
+    for operation in plan.get("operations", []):
+        op = operation.get("op")
+        if op == "add_scalar":
+            expression = f"({expression} + {operation['value']})"
+        elif op == "sub_scalar":
+            expression = f"({expression} - {operation['value']})"
+        elif op == "mul_scalar":
+            expression = f"({operation['value']} * {expression})"
+        elif op == "add_encrypted_scalar":
+            expression = f"({expression} + ⟦c⟧)"
+        elif op == "sub_encrypted_scalar":
+            expression = f"({expression} - ⟦c⟧)"
+        elif op == "mul_encrypted_scalar":
+            expression = f"(⟦c⟧ * {expression})"
+        elif op == "square":
+            expression = f"({expression})^2"
+        elif op == "polynomial":
+            expression = _polynomial_display_formula(operation)
+        elif op == "sum_reduce":
+            expression = f"sum({expression})"
+        elif op == "mean_reduce":
+            expression = f"mean({expression})"
+        elif op == "dot_product_public":
+            expression = f"dot_public({expression}, w)"
+    return expression
+
+
+def _polynomial_display_formula(operation: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for term in operation.get("terms", []):
+        coefficient = term["coefficient"]
+        power = term["power"]
+        if power == 1:
+            parts.append(f"{coefficient}*x")
+        else:
+            parts.append(f"{coefficient}*x^{power}")
+    constant = operation.get("constant", 0)
+    if constant:
+        parts.append(str(constant))
+    return " + ".join(parts) if parts else "0"

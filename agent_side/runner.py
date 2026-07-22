@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agent_side.crypto import decrypt_vector, encrypt_vector, make_context
+from agent_side.crypto import decrypt_vector, encrypt_scalar_operand, encrypt_vector, make_context
 from agent_side.planner import plan_he_task
 from agent_side.preflight import preflight_input_vector, preflight_plan, preflight_task_prompt
 from agent_side.reporting import print_report
@@ -13,6 +13,7 @@ from agent_side.transport import post_compute
 from he_common.demo_state import reset_demo_state, update_agent, update_result
 from he_common.operations import (
     apply_plaintext_pipeline,
+    build_server_display_formula,
     data_profile,
     estimate_depth,
     normalize_decrypted_result,
@@ -20,7 +21,13 @@ from he_common.operations import (
 )
 
 
-def run_agent_task(redacted_prompt: str, data: list[float], *, reset_state: bool = True) -> dict[str, Any]:
+def run_agent_task(
+    redacted_prompt: str,
+    data: list[float],
+    *,
+    reset_state: bool = True,
+    encrypt_formula_constants: bool = False,
+) -> dict[str, Any]:
     if reset_state:
         reset_demo_state()
     update_agent("collecting_input", "Task received from user input.", {"vector_length": len(data)})
@@ -36,6 +43,8 @@ def run_agent_task(redacted_prompt: str, data: list[float], *, reset_state: bool
     )
     raw_plan = plan_he_task(redacted_prompt, profile)
     plan = sanitize_plan(raw_plan, profile)
+    if encrypt_formula_constants:
+        plan = _encrypt_plan_constants(plan)
 
     depth = estimate_depth(plan["operations"])
     preflight = preflight_plan(plan, len(data))
@@ -48,6 +57,7 @@ def run_agent_task(redacted_prompt: str, data: list[float], *, reset_state: bool
             "depth": depth,
             "estimated_payload_kb": round(preflight.estimated_payload_bytes / 1024, 2),
             "warnings": preflight.warnings,
+            "encrypt_formula_constants": encrypt_formula_constants,
         },
     )
 
@@ -56,10 +66,11 @@ def run_agent_task(redacted_prompt: str, data: list[float], *, reset_state: bool
     update_agent("encrypting", "Encrypting local data.", {"scheme": plan["scheme"]})
     t0 = time.perf_counter()
     encrypted_vector = encrypt_vector(context, plan["scheme"], data)
+    encrypted_operands = _build_encrypted_operands(context, plan, len(data))
     encryption_time = time.perf_counter() - t0
 
     update_agent("sending", "Sending ciphertext and operation schema to compute service.")
-    server_response, _ = post_compute(context, encrypted_vector, plan)
+    server_response, _ = post_compute(context, encrypted_vector, plan, encrypted_operands)
 
     result_path = Path(server_response["result_path"])
     update_agent("decrypting", "Decrypting returned ciphertext locally.")
@@ -80,6 +91,7 @@ def run_agent_task(redacted_prompt: str, data: list[float], *, reset_state: bool
         server_response,
         {"encryption": encryption_time, "decryption": decryption_time},
         poly_mod_degree,
+        encrypt_formula_constants,
     )
     saved_result_path = save_agent_result(result_summary)
     result_summary["saved_result_path"] = saved_result_path
@@ -99,3 +111,35 @@ def run_agent_task(redacted_prompt: str, data: list[float], *, reset_state: bool
         "poly_mod_degree": poly_mod_degree,
         "result_summary": result_summary,
     }
+
+
+def _encrypt_plan_constants(plan: dict[str, Any]) -> dict[str, Any]:
+    transformed = dict(plan)
+    transformed_ops: list[dict[str, Any]] = []
+    operand_index = 0
+    for operation in plan["operations"]:
+        op = operation["op"]
+        if op in {"add_scalar", "sub_scalar", "mul_scalar"}:
+            transformed_op = dict(operation)
+            transformed_op["op"] = op.replace("_scalar", "_encrypted_scalar")
+            transformed_op["operand_key"] = f"enc_const_{operand_index}"
+            transformed_ops.append(transformed_op)
+            operand_index += 1
+        else:
+            transformed_ops.append(dict(operation))
+    transformed["operations"] = transformed_ops
+    transformed["notes"] = (
+        f"{plan['notes']} Constants in eligible scalar operations were encrypted before server evaluation."
+    ).strip()
+    transformed["server_display_formula"] = build_server_display_formula(transformed)
+    return transformed
+
+
+def _build_encrypted_operands(context, plan: dict[str, Any], vector_size: int) -> dict[str, Any]:
+    operands: dict[str, Any] = {}
+    for operation in plan["operations"]:
+        operand_key = operation.get("operand_key")
+        if not operand_key:
+            continue
+        operands[operand_key] = encrypt_scalar_operand(context, plan["scheme"], operation["value"], vector_size)
+    return operands

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import tenseal as ts
+
 from he_common.operations import polynomial_power_depth
 
 
 def run_pipeline(vector, params: dict, *, integer: bool) -> tuple[object, int]:
     operations = params.get("operations")
+    encrypted_operands = params.get("encrypted_operands") or {}
     if not isinstance(operations, list) or not operations:
         raise ValueError("params.operations must be a non-empty list.")
     if len(operations) > 12:
@@ -28,14 +31,14 @@ def run_pipeline(vector, params: dict, *, integer: bool) -> tuple[object, int]:
             vector = _dot_product_public(vector, operation, integer=integer)
             max_depth += 1
         else:
-            vector = _apply_basic_op(vector, operation, integer=integer)
-            if op == "square":
+            vector = _apply_basic_op(vector, operation, encrypted_operands, integer=integer)
+            if op in {"square", "mul_encrypted_scalar"}:
                 max_depth += 1
 
     return vector, max_depth
 
 
-def _apply_basic_op(vector, operation: dict, *, integer: bool):
+def _apply_basic_op(vector, operation: dict, encrypted_operands: dict, *, integer: bool):
     op = operation.get("op")
 
     if op == "add_scalar":
@@ -47,6 +50,12 @@ def _apply_basic_op(vector, operation: dict, *, integer: bool):
     if op == "mul_scalar":
         value = _require_number(operation.get("value"), "value", integer=integer)
         return vector * value
+    if op == "add_encrypted_scalar":
+        return vector + _load_encrypted_operand(vector, operation, encrypted_operands, integer=integer)
+    if op == "sub_encrypted_scalar":
+        return vector - _load_encrypted_operand(vector, operation, encrypted_operands, integer=integer)
+    if op == "mul_encrypted_scalar":
+        return vector * _load_encrypted_operand(vector, operation, encrypted_operands, integer=integer)
     if op == "square":
         return vector.square()
 
@@ -157,3 +166,19 @@ def _power_vector(vector, exponent: int, cache: dict[int, object]):
 
 def _scalar_vector(vector, value):
     return [value] * vector.size()
+
+
+def _load_encrypted_operand(vector, operation: dict, encrypted_operands: dict, *, integer: bool):
+    operand_key = operation.get("operand_key")
+    if not isinstance(operand_key, str) or not operand_key:
+        raise ValueError(f"{operation.get('op')} requires a valid operand_key.")
+    operand_payload = encrypted_operands.get(operand_key)
+    if not isinstance(operand_payload, (bytes, bytearray)):
+        raise ValueError(f"Missing encrypted operand bytes for key '{operand_key}'.")
+    if _is_bfv_vector(vector):
+        return ts.bfv_vector_from(vector.context(), bytes(operand_payload))
+    return ts.ckks_vector_from(vector.context(), bytes(operand_payload))
+
+
+def _is_bfv_vector(vector) -> bool:
+    return vector.__class__.__name__.lower().startswith("bfv")

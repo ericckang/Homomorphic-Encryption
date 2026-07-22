@@ -35,7 +35,7 @@ def dashboard() -> str:
 <head>
   <meta charset=\"UTF-8\" />
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
-  <title>HE Demo Dashboard</title>
+  <title>Untrusted HE Server Dashboard</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -46,6 +46,7 @@ def dashboard() -> str:
     }
     h1 { margin: 0 0 8px 0; }
     p { color: #94a3b8; }
+    main { max-width: 1320px; margin: 0 auto; }
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -147,7 +148,8 @@ def dashboard() -> str:
   </style>
 </head>
 <body>
-  <h1>Homomorphic Encryption Demo Dashboard</h1>
+<main>
+  <h1>Untrusted HE Server Dashboard</h1>
 
   <div class=\"pipeline\">
     <div class=\"pipeline-step\" id=\"step-input\">Input</div>
@@ -159,20 +161,6 @@ def dashboard() -> str:
   </div>
 
   <div class=\"grid\">
-    <section class=\"card\">
-      <div class=\"label\">Two-Process Demo</div>
-      <div class=\"value\">Run the trusted agent separately</div>
-      <div class=\"muted\">This dashboard belongs to the untrusted server process. It monitors <code>he_shared/demo_status.json</code> and the server compute log, but it does not execute agent code.</div>
-      <pre># Terminal 1: untrusted compute server
-python server.py
-
-# Terminal 2: trusted data-owner agent
-export AZURE_OPENAI_KEY=\"&lt;your-key&gt;\"
-python agent.py</pre>
-      <div class=\"muted\">Example prompt for the agent:</div>
-      <pre>Sum all salary into a scalar. data=[100, 90000, 95000]</pre>
-    </section>
-
     <section class=\"card\">
       <div class=\"label\">Agent</div>
       <div class=\"value\" id=\"agent-stage\">Loading...</div>
@@ -194,6 +182,8 @@ python agent.py</pre>
         <tbody>
           <tr><td>Computation Type</td><td id=\"server-computation-type\">-</td></tr>
           <tr><td>Scheme</td><td id=\"server-scheme\">-</td></tr>
+          <tr><td>Encrypted Constants</td><td id=\"server-encrypted-constants\">-</td></tr>
+          <tr><td>Server View Formula</td><td id=\"server-display-formula\" class=\"mono-wrap\">-</td></tr>
           <tr><td>Payload Size (KB)</td><td id=\"server-payload-kb\">-</td></tr>
           <tr><td>Hex Preview</td><td id=\"server-hex-preview\" class=\"mono-wrap\">-</td></tr>
         </tbody>
@@ -218,6 +208,11 @@ python agent.py</pre>
   <script>
     function setText(id, value) {
       document.getElementById(id).textContent = value;
+    }
+
+    function formatServerFormula(value) {
+      if (!value) return '-';
+      return value;
     }
 
     function setPipelineStage(agentStage, serverStage) {
@@ -289,8 +284,11 @@ python agent.py</pre>
       const hexPreview = rawHexPreview
         ? (rawHexPreview.length > 96 ? `${rawHexPreview.slice(0, 96)}...` : rawHexPreview)
         : '-';
+      const encryptedOperandCount = data.server?.last_request?.encrypted_operand_count;
       setText('server-computation-type', data.server?.last_request?.computation_type ?? '-');
       setText('server-scheme', data.server?.last_request?.scheme ?? '-');
+      setText('server-encrypted-constants', encryptedOperandCount === undefined ? '-' : (encryptedOperandCount > 0 ? 'Yes' : 'No'));
+      setText('server-display-formula', formatServerFormula(data.server?.last_request?.server_display_formula));
       setText('server-payload-kb', data.server?.last_request?.payload_kb ?? '-');
       setText('server-hex-preview', hexPreview);
       setText('server-evaluation-time', data.server?.last_request?.evaluation_time_sec ?? '-');
@@ -300,6 +298,7 @@ python agent.py</pre>
     refresh();
     setInterval(refresh, 250);
   </script>
+</main>
 </body>
 </html>
     """
@@ -323,6 +322,9 @@ def capabilities() -> dict:
             "add_scalar",
             "sub_scalar",
             "mul_scalar",
+            "add_encrypted_scalar",
+            "sub_encrypted_scalar",
+            "mul_encrypted_scalar",
             "square",
             "polynomial",
             "sum_reduce",
@@ -340,11 +342,14 @@ def compute(req: ComputeRequest) -> ComputeResponse:
         raise HTTPException(400, f"Unsupported scheme '{req.scheme}'. Available: ['BFV', 'CKKS']")
 
     payload_path = resolve_in_shared(req.payload_path, must_exist=True)
+    encrypted_operand_paths = req.params.get("encrypted_operand_paths") or {}
     last_request = {
         "computation_type": req.computation_type,
         "scheme": scheme,
         "schema_name": str(req.params.get("schema_name", req.computation_type)),
         "payload_path": str(payload_path),
+        "encrypted_operand_count": len(encrypted_operand_paths) if isinstance(encrypted_operand_paths, dict) else 0,
+        "server_display_formula": str(req.params.get("server_display_formula", "-"))[:300],
     }
     update_server("received", "Server received a compute request.", last_request)
 
@@ -362,12 +367,14 @@ def compute(req: ComputeRequest) -> ComputeResponse:
     audit_meta = audit_payload(req.computation_type, raw_payload)
     last_request["payload_kb"] = audit_meta.get("payload_kb")
     last_request["hex_preview"] = audit_meta.get("hex_preview")
+    encrypted_operands = _load_encrypted_operands(encrypted_operand_paths)
     update_server("audited", "Server audited ciphertext payload and confirmed blind evaluation input.", last_request)
 
     try:
         vector = _deserialize(scheme, context, raw_payload)
         t0 = time.perf_counter()
         operations = req.params.get("operations")
+        req.params["encrypted_operands"] = encrypted_operands
         result, depth = run_pipeline(vector, req.params, integer=(scheme == "BFV"))
         eval_time = time.perf_counter() - t0
         last_request["evaluation_time_sec"] = round(eval_time, 4)
@@ -399,6 +406,24 @@ def compute(req: ComputeRequest) -> ComputeResponse:
         evaluation_time_sec=eval_time,
         audit=audit_meta,
     )
+
+
+def _load_encrypted_operands(operand_paths: dict[str, str]) -> dict[str, bytes]:
+    if not isinstance(operand_paths, dict):
+        raise HTTPException(400, "params.encrypted_operand_paths must be an object when provided.")
+    loaded: dict[str, bytes] = {}
+    total_bytes = 0
+    for key, path_str in operand_paths.items():
+        if not isinstance(key, str) or not key.strip():
+            raise HTTPException(400, "Encrypted operand keys must be non-empty strings.")
+        if not isinstance(path_str, str) or not path_str.strip():
+            raise HTTPException(400, f"Encrypted operand path for key '{key}' must be a non-empty string.")
+        raw = resolve_in_shared(path_str, must_exist=True).read_bytes()
+        total_bytes += len(raw)
+        if total_bytes > settings.MAX_PAYLOAD_BYTES:
+            raise HTTPException(413, "Combined encrypted operand payloads exceed the configured limit.")
+        loaded[key.strip()] = raw
+    return loaded
 
 
 def _deserialize(scheme: str, context, raw: bytes):

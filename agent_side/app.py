@@ -28,6 +28,7 @@ class AgentRunRequest(BaseModel):
     task_prompt: str
     manual_values: str | None = None
     csv_text: str | None = None
+    encrypt_formula_constants: bool = False
 
 
 @app.on_event("startup")
@@ -99,9 +100,12 @@ def agent_dashboard() -> str:
     }
     .input-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
+      grid-template-columns: minmax(0, 1fr);
       gap: 16px;
       align-items: start;
+    }
+    .input-card {
+      width: 100%;
     }
     .label {
       font-size: 12px;
@@ -135,6 +139,30 @@ def agent_dashboard() -> str:
       color: #e5e7eb;
       font: 15px ui-monospace, SFMono-Regular, Menlo, monospace;
     }
+    .file-input-hidden {
+      display: none;
+    }
+    .file-upload-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 6px;
+      flex-wrap: wrap;
+    }
+    .file-upload-button {
+      margin-top: 0;
+      padding: 10px 16px;
+      box-shadow: none;
+      background: #1e293b;
+      border: 1px solid #334155;
+    }
+    .file-upload-name {
+      color: #cbd5e1;
+      font-size: 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      word-break: break-all;
+    }
+
     textarea { min-height: 96px; resize: vertical; }
     button {
       margin-top: 16px;
@@ -212,11 +240,11 @@ def agent_dashboard() -> str:
       padding-bottom: 0;
     }
     @media (max-width: 960px) {
-      .input-grid {
-        grid-template-columns: 1fr;
-      }
       .pipeline {
         grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .input-card {
+        width: 100%;
       }
     }
   </style>
@@ -236,7 +264,7 @@ def agent_dashboard() -> str:
   </div>
 
   <section class=\"input-grid\">
-    <section class=\"card\">
+    <section class=\"card input-card\">
       <div class=\"label\">Run Private Task</div>
       <div class=\"value\">Submit input from the trusted side</div>
       <div class=\"muted\">If the request exceeds local limits, the agent will block it before anything is sent to the server.</div>
@@ -248,24 +276,21 @@ def agent_dashboard() -> str:
       <input id=\"manual-values\" placeholder=\"[100, 90000, 95000]\" />
 
       <label for=\"csv-file\">CSV upload</label>
-      <input id=\"csv-file\" type=\"file\" accept=\".csv,text/csv\" />
-      <div class=\"muted\">CSV may include a <code>value</code> header or one headerless numeric column.</div>
+      <input id=\"csv-file\" class=\"file-input-hidden\" type=\"file\" accept=\".csv,text/csv\" onchange=\"updateSelectedFileName()\" />
+      <div class=\"file-upload-row\">
+        <button type=\"button\" class=\"file-upload-button\" onclick=\"document.getElementById('csv-file').click()\">Choose CSV File</button>
+        <span id=\"csv-file-name\" class=\"file-upload-name\">No file selected</span>
+      </div>
+
+      <label for=\"encrypt-formula-constants\">
+        <input id=\"encrypt-formula-constants\" type=\"checkbox\" style=\"width:auto; display:inline-block; margin-right:8px;\" />
+        Encrypt eligible formula constants before sending the plan to the server
+      </label>
+      <div class=\"muted\">For operations like x+5, x-5, or x*5, the constant can be turned into ciphertext so the server only sees an encrypted operand.</div>
 
       <button id=\"run-button\" onclick=\"runAgent()\">Run Trusted Agent</button>
+
       <div id=\"run-message\" class=\"note\">Ready for a new encrypted computation.</div>
-    </section>
-
-    <section class=\"card\">
-      <div class=\"label\">Two-Process Demo</div>
-      <div class=\"value\">Run the compute service separately</div>
-      <div class=\"muted\">The server receives only a bounded operation schema plus ciphertext artifacts from this agent.</div>
-      <pre># Terminal 1: untrusted compute server
-python server.py
-
-# Terminal 2: trusted data-owner agent
-export AZURE_OPENAI_KEY="&lt;your-key&gt;"
-python agent.py</pre>
-      <div class=\"muted\">Default server endpoint: <code>http://127.0.0.1:8080/compute</code></div>
     </section>
   </section>
 
@@ -353,6 +378,12 @@ async function csvTextFromFile() {
   return await fileInput.files[0].text();
 }
 
+function updateSelectedFileName() {
+  const fileInput = document.getElementById('csv-file');
+  const label = document.getElementById('csv-file-name');
+  label.textContent = fileInput.files.length ? fileInput.files[0].name : 'No file selected';
+}
+
 async function runAgent() {
   const button = document.getElementById('run-button');
   const message = document.getElementById('run-message');
@@ -367,6 +398,7 @@ async function runAgent() {
         task_prompt: document.getElementById('task-prompt').value,
         manual_values: document.getElementById('manual-values').value,
         csv_text: await csvTextFromFile(),
+        encrypt_formula_constants: document.getElementById('encrypt-formula-constants').checked,
       }),
     });
     const data = await res.json();
@@ -392,7 +424,9 @@ function seconds(value) {
 }
 
 function renderRunResult(result) {
-  const title = result ? `${result.schema_name} (${result.scheme})` : 'No result yet';
+  const title = result
+    ? `${result.schema_name} (${result.scheme}${result.encrypt_formula_constants ? ', encrypted constants' : ''})`
+    : 'No result yet';
   setText('result-title', title);
   setText('result-summary', result?.formula || 'Waiting for agent decryption...');
   setText('result-vector-length', result?.vector_length ?? '-');
@@ -570,7 +604,12 @@ def run_task(req: AgentRunRequest) -> dict[str, Any]:
                 "conservative_payload_kb": round(conservative_payload / 1024, 2),
             },
         )
-        result = run_agent_task(redacted_prompt, data, reset_state=False)
+        result = run_agent_task(
+            redacted_prompt,
+            data,
+            reset_state=False,
+            encrypt_formula_constants=req.encrypt_formula_constants,
+        )
         return {
             "status": "success",
             "result_summary": result["result_summary"],

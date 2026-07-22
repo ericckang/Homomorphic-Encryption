@@ -9,7 +9,7 @@ import requests
 from he_common.config import SERVER_URL, SHARED_DIR
 
 
-def post_compute(context, encrypted_vector, plan: dict[str, Any]) -> tuple[dict[str, Any], float]:
+def post_compute(context, encrypted_vector, plan: dict[str, Any], encrypted_operands: dict[str, Any] | None = None) -> tuple[dict[str, Any], float]:
     run_id = uuid.uuid4().hex[:10]
     context_path = SHARED_DIR / f"{run_id}_context.bin"
     payload_path = SHARED_DIR / f"{run_id}_payload.bin"
@@ -17,6 +17,12 @@ def post_compute(context, encrypted_vector, plan: dict[str, Any]) -> tuple[dict[
 
     context_path.write_bytes(context.serialize(save_secret_key=False))
     payload_path.write_bytes(encrypted_vector.serialize())
+
+    operand_paths: dict[str, str] = {}
+    for operand_key, operand_vector in (encrypted_operands or {}).items():
+        operand_path = SHARED_DIR / f"{run_id}_{operand_key}.bin"
+        operand_path.write_bytes(operand_vector.serialize())
+        operand_paths[operand_key] = str(operand_path)
 
     request_body = {
         "computation_type": plan["computation_type"],
@@ -28,6 +34,8 @@ def post_compute(context, encrypted_vector, plan: dict[str, Any]) -> tuple[dict[
             "schema_name": plan["schema_name"],
             "operations": plan["operations"],
             "result_label": plan["result_label"],
+            "server_display_formula": plan.get("server_display_formula", plan.get("plaintext_formula", "-")),
+            "encrypted_operand_paths": operand_paths,
         },
     }
 

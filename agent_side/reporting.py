@@ -13,6 +13,7 @@ def print_report(
     server_response: dict[str, Any],
     timings: dict[str, float],
     poly_mod_degree: int,
+    encrypt_formula_constants: bool,
 ) -> dict[str, Any]:
     if plan.get("result_shape") == "scalar":
         samples = [
@@ -53,6 +54,7 @@ def print_report(
         "samples": samples,
         "expected_output": expected,
         "decrypted_output": decrypted,
+        "encrypt_formula_constants": encrypt_formula_constants,
     }
     print("\n" + "=" * 72)
     print("Generalized HE Agent Result")
@@ -71,6 +73,7 @@ def print_report(
     print(f"Round-trip time    : {server_response['_roundtrip_time_sec']:.4f} sec")
     print(f"Decryption time    : {timings['decryption']:.4f} sec")
     print(f"Server audit       : {server_response['audit']['payload_kb']} KB ciphertext")
+    print(f"Encrypted constants: {'yes' if encrypt_formula_constants else 'no'}")
 
     print("\nResult sample")
     for sample in samples:

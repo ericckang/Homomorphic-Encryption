@@ -38,3 +38,8 @@ def decrypt_vector(context, scheme: str, raw: bytes) -> list[float]:
     if scheme == "BFV":
         return ts.bfv_vector_from(context, raw).decrypt()
     return ts.ckks_vector_from(context, raw).decrypt()
+
+
+def encrypt_scalar_operand(context, scheme: str, value: float, vector_size: int):
+    repeated = [int(value)] * vector_size if scheme == "BFV" else [float(value)] * vector_size
+    return encrypt_vector(context, scheme, repeated)
