@@ -12,3 +12,6 @@ requests>=2.31
 
 # Agent planner (agent_side/planner.py) - Azure OpenAI
 openai>=1.0
+
+# Plotting benchmark results
+matplotlib>=3.8
