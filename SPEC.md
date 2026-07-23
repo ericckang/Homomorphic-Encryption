@@ -35,7 +35,8 @@ The agent side is trusted. It handles:
 - User task prompt and numeric input parsing.
 - Agent-side web UI for prompt, manual vector input, and CSV upload.
 - Azure OpenAI planning from a redacted task prompt.
-- Rule-based parsing for supported multi-column CSV arithmetic formulas.
+- Azure OpenAI table-intent parsing for CSV tasks.
+- Deterministic validation for supported CSV arithmetic formulas.
 - Early preflight checks before LLM planning and server transfer.
 - HE parameter selection.
 - Key/context generation.
@@ -48,10 +49,10 @@ Important files:
 
 - `agent_side/cli.py`: orchestrates the full agent workflow.
 - `agent_side/app.py`: trusted agent web UI and API.
-- `agent_side/input_data.py`: parses inline data or CSV input.
-- `agent_side/formula_parser.py`: parses and validates rule-based multi-column encrypted formulas.
+- `agent_side/input_data.py`: parses inline/manual/CSV input, routes requests, asks the LLM for CSV table intent, and applies deterministic validation.
+- `agent_side/formula_parser.py`: parses and validates supported CSV arithmetic formulas.
 - `agent_side/input_models.py`: typed agent-side CSV/input structures.
-- `agent_side/planner.py`: calls Azure OpenAI to produce an operation schema.
+- `agent_side/planner.py`: calls Azure OpenAI both for generic HE planning and for CSV table-intent parsing.
 - `agent_side/preflight.py`: rejects unsupported or impractical plans before encryption.
 - `agent_side/crypto.py`: creates TenSEAL contexts and encrypts/decrypts vectors.
 - `agent_side/transport.py`: writes ciphertext artifacts and calls the server.
@@ -177,7 +178,7 @@ polynomial coefficient. These constants are not treated as private user data in
 this demo. If a future use case requires private thresholds or private
 coefficients, those values must also be encrypted on the agent side.
 
-## 5. LLM Planning Model
+## 5. LLM Planning and Validation Model
 
 The LLM does not receive raw user data. The agent redacts inline values before
 calling Azure OpenAI.
@@ -204,19 +205,29 @@ The LLM also receives non-sensitive metadata:
 }
 ```
 
-The LLM returns an operation schema. The agent validates it before sending it to
-the server.
+For generic single-vector tasks, the LLM returns an operation schema. The agent validates it before sending it to the server.
 
-For supported multi-column CSV arithmetic formulas such as:
+For CSV tasks, the current prototype uses a two-stage model:
+
+1. **LLM table intent parsing**
+   - The model classifies a CSV request as one of:
+     - `formula`
+     - `reduction`
+     - `planner`
+2. **Deterministic validation**
+   - If the model proposes a formula, the agent validates it locally.
+   - Validation checks supported operators, referenced columns, numeric-column hygiene, and known unsupported syntax.
+
+For supported CSV arithmetic formulas such as:
 
 ```text
 compute risk score = salary^2 + 5 * age + 6
 ```
 
-the current prototype takes a different path: the agent parses the formula
-locally with a rule-based parser, encrypts each referenced column separately,
-and sends a restricted serialized expression tree to the server. This path does
-not rely on the planner.
+the current prototype does not directly trust the LLM to execute semantics.
+Instead, the LLM proposes intent, the agent validates the formula locally,
+encrypts each referenced column separately, and sends a restricted serialized
+expression tree to the server.
 
 The agent also runs preflight checks before encryption. These checks reject
 tasks that are not supported by the current HE pipeline, such as sorting,
@@ -244,8 +255,8 @@ dot_product_public  weighted score against a public weight vector
 The server executes only this bounded DSL for planner-driven requests. It does
 not execute arbitrary code from the LLM or from the client.
 
-In addition, the current prototype supports a restricted rule-based multi-column
-CSV formula path. In that path, the agent parses arithmetic expressions such as
+In addition, the current prototype supports a restricted validated CSV formula
+path. In that path, the agent validates arithmetic expressions such as
 `salary^2 + 5 * age + 6`, encrypts each referenced CSV column separately, and
 sends a serialized expression tree plus multiple ciphertext vectors to the
 server.
@@ -304,7 +315,25 @@ Supported restricted multi-column formula operators:
 - `*`
 - positive integer powers via `^`
 
-## 7. Compute Flow
+## 7. Request Paths and Compute Flow
+
+There are three important request families in the current architecture.
+
+### A. Generic planner path
+- Input is a vector or a single chosen CSV numeric column.
+- Azure OpenAI returns the bounded HE DSL.
+- The server executes `operations`.
+
+### B. Validated CSV formula path
+- Input is a CSV with one or more referenced numeric columns.
+- Azure OpenAI first proposes a table intent.
+- The trusted agent validates the formula locally.
+- The server executes a restricted serialized formula tree over ciphertext.
+
+### C. Rejected path
+- Unknown columns, unsupported syntax, missing data, and malformed CSV input should be rejected on the trusted side before compute.
+
+### Detailed compute flow
 
 ```text
 1. User starts server.py.
@@ -313,20 +342,21 @@ Supported restricted multi-column formula operators:
 4. Agent reads task prompt and numeric data.
 5. Agent runs early preflight checks for empty input, vector size, and payload estimate.
 6. If the request is a normal single-vector task, the agent redacts raw data before the LLM planner call.
-7. If the request is a supported multi-column CSV arithmetic formula, the agent parses it locally with the rule-based formula parser instead of relying on the planner.
-8. Agent validates the schema or formula tree.
-9. Agent runs plan/depth checks.
-10. Agent selects BFV or CKKS and creates a TenSEAL context.
-11. Agent encrypts the input vector locally.
-12. For supported multi-column formulas, the agent also encrypts each referenced CSV numeric column separately.
-13. Agent writes public context and ciphertext artifacts to he_shared/.
-14. Agent sends file paths, scheme, and operations or formula tree to server /compute.
-15. Server verifies paths are inside he_shared/.
-16. Server rejects contexts containing a secret key.
-17. Server executes the approved DSL or the restricted formula tree over ciphertext.
-18. Server writes encrypted result to he_shared/.
-19. Agent reads encrypted result and decrypts locally.
-20. Agent shows decrypted samples, timings, CKKS error when applicable, and the saved result path.
+7. If the request is a CSV task, the agent may first ask the LLM for table intent classification.
+8. If the request is a supported CSV arithmetic formula, the trusted agent validates the formula locally.
+9. Agent validates the schema or formula tree.
+10. Agent runs plan/depth checks.
+11. Agent selects BFV or CKKS and creates a TenSEAL context.
+12. Agent encrypts the input vector locally.
+13. For supported formula requests, the agent also encrypts each referenced CSV numeric column separately.
+14. Agent writes public context and ciphertext artifacts to he_shared/.
+15. Agent sends file paths, scheme, and operations or formula tree to server /compute.
+16. Server verifies paths are inside he_shared/.
+17. Server rejects contexts containing a secret key.
+18. Server executes the approved DSL or the restricted formula tree over ciphertext.
+19. Server writes encrypted result to he_shared/.
+20. Agent reads encrypted result and decrypts locally.
+21. Agent shows decrypted samples, timings, CKKS error when applicable, and the saved result path.
 ```
 
 ## 8. How to Run
@@ -406,10 +436,16 @@ Example CKKS weighted-score prompt:
 Compute a weighted risk score with weights [0.2, 0.3, 0.5]. data=[1.0, 2.0, 3.0]
 ```
 
-Example supported multi-column CSV encrypted formula:
+Example supported CSV encrypted formula:
 
 ```text
 compute risk score = salary^2 + 5 * age + 6
+```
+
+Another natural-language style that should map into the same validated formula path is:
+
+```text
+Compute risk score salary * 3 + age
 ```
 
 ## 9. How to Test
@@ -456,6 +492,8 @@ Before encrypting data or calling the server, the agent checks:
 - BFV multiplication depth above the demo limit.
 - Unsupported task hints such as median, sort, min/max, branching, boolean
   comparison, encrypted division, and general classification.
+- Unsupported formula syntax such as `/`, `>`, `<`, `log(...)`, and `if ... else`.
+- Missing web input data when no CSV, manual values, or inline vector is provided.
 - CSV hygiene errors such as blank rows, mismatched row widths, missing numeric
   values, non-numeric values in numeric columns, and unnamed headers.
 
@@ -480,7 +518,7 @@ system limitations.
 
 This project is a capstone prototype, not a production HE platform.
 
-- Inputs support one encrypted vector for the generic planner-driven DSL, plus a restricted rule-based path for multi-column CSV arithmetic formulas.
+- Inputs support one encrypted vector for the generic planner-driven DSL, plus a restricted validated CSV formula path for arithmetic formulas.
 - The generic operation schema still centers on one primary encrypted vector per request plus an
   optional final vector-to-scalar reduction; it does not yet support arbitrary table
   joins, planner-driven multi-input encrypted DAGs, multi-column encrypted feature matrices, or general dataframes.
@@ -496,6 +534,7 @@ This project is a capstone prototype, not a production HE platform.
 - Full multi-party federated aggregation is not implemented; the current server
   accepts one primary ciphertext payload per compute request, with optional extra
   ciphertext inputs only for the restricted formula path.
+- LLM intent parsing can still be imperfect, so the architecture depends on deterministic validation on the trusted side to reject unsupported or hallucinated formula requests.
 - `he_shared/` is a local demo transport. A production system would use a
   remote object store, upload API, or message queue for ciphertext artifacts.
 - CKKS results are approximate, and error grows with multiplicative depth.
