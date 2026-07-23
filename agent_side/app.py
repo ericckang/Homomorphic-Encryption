@@ -8,8 +8,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from agent_side.input_data import resolve_task_and_data
-from agent_side.preflight import agent_limits, estimate_payload_bytes, preflight_input_vector
-from agent_side.result_store import list_agent_results
+from agent_side.preflight import estimate_payload_bytes, preflight_input_vector
 from agent_side.runner import run_agent_task
 from he_common.demo_state import read_demo_state, reset_demo_state, update_agent
 from he_common.operations import data_profile
@@ -53,7 +52,7 @@ def agent_dashboard() -> str:
     }
     h1 { margin: 0 0 8px 0; }
     p { color: #94a3b8; }
-    main { max-width: 1320px; margin: 0 auto; }
+    main { max-width: 1680px; margin: 0 auto; }
     .pipeline {
       display: grid;
       grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -94,6 +93,21 @@ def agent_dashboard() -> str:
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       gap: 16px;
       margin-top: 16px;
+    }
+    .status-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+      margin-top: 16px;
+      align-items: stretch;
+    }
+    .status-stack {
+      display: grid;
+      gap: 16px;
+      align-content: start;
+    }
+    .result-card {
+      height: 100%;
     }
     .input-grid {
       display: grid;
@@ -219,22 +233,8 @@ def agent_dashboard() -> str:
       word-break: break-all;
       white-space: normal;
     }
-    .pill {
-      display: inline-block;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: #1d4ed8;
-      font-size: 12px;
-      font-weight: 700;
-      margin: 0 8px 8px 0;
-    }
-    .saved-item {
-      padding: 10px 0;
-      border-bottom: 1px solid #1f2937;
-    }
-    .saved-item:last-child {
-      border-bottom: 0;
-      padding-bottom: 0;
+    .server-hidden {
+      color: #94a3b8;
     }
     @media (max-width: 960px) {
       .pipeline {
@@ -242,6 +242,9 @@ def agent_dashboard() -> str:
       }
       .input-card {
         width: 100%;
+      }
+      .status-layout {
+        grid-template-columns: minmax(0, 1fr);
       }
     }
   </style>
@@ -267,7 +270,7 @@ def agent_dashboard() -> str:
       <div class=\"muted\">If the request exceeds local limits, the agent will block it before anything is sent to the server.</div>
 
       <label for=\"task-prompt\">Task prompt</label>
-      <textarea id=\"task-prompt\">Sum all salary into a scalar. data=[100, 90000, 95000]</textarea>
+      <textarea id=\"task-prompt\">Apply 0.5x^2 + 3x - 5 to the data. data=[22, 30, 4, 5, 1]</textarea>
 
       <label for=\"manual-values\">Manual values, if not included in prompt</label>
       <input id=\"manual-values\" placeholder=\"[100, 90000, 95000]\" />
@@ -291,33 +294,46 @@ def agent_dashboard() -> str:
     </section>
   </section>
 
-  <section class=\"grid\">
-    <section class=\"card\">
-      <div class=\"label\">Agent</div>
-      <div class=\"value\" id=\"agent-stage\">Loading...</div>
-      <div class=\"muted\" id=\"agent-message\"></div>
-      <table class=\"kv-table\">
-        <tbody>
-          <tr><td>Schema Name</td><td id=\"agent-schema-name\">-</td></tr>
-          <tr><td>Input Profile</td><td id=\"agent-input-profile\">-</td></tr>
-          <tr><td>Estimated Payload</td><td id=\"agent-payload-estimate\">-</td></tr>
-        </tbody>
-      </table>
-    </section>
+  <section class=\"status-layout\">
+    <div class=\"status-stack\">
+      <section class=\"card\">
+        <div class=\"label\">Agent</div>
+        <div class=\"value\" id=\"agent-stage\">Loading...</div>
+        <div class=\"muted\" id=\"agent-message\"></div>
+        <table class=\"kv-table\">
+          <tbody>
+            <tr><td>Planned Task</td><td id=\"agent-planned-task\">-</td></tr>
+            <tr><td>HE Scheme</td><td id=\"agent-he-scheme\">-</td></tr>
+            <tr><td>Estimated Depth</td><td id=\"agent-depth\">-</td></tr>
+            <tr><td>Input Summary</td><td id=\"agent-input-profile\">-</td></tr>
+            <tr><td>Estimated Payload (KB)</td><td id=\"agent-payload-estimate\">-</td></tr>
+          </tbody>
+        </table>
+      </section>
 
-    <section class=\"card\">
-      <div class=\"label\">Server</div>
-      <div class=\"value\" id=\"server-stage\">Loading...</div>
-      <div class=\"muted\" id=\"server-message\"></div>
-      <table class=\"kv-table\">
-        <tbody>
-          <tr><td>Payload Size (KB)</td><td id=\"server-payload-kb\">-</td></tr>
-          <tr><td>Hex Preview</td><td id=\"server-hex-preview\" class=\"mono-wrap\">-</td></tr>
-        </tbody>
-      </table>
-    </section>
+      <section class=\"card\">
+        <div class=\"label\">Server</div>
+        <div class=\"value\" id=\"server-stage\">Loading...</div>
+        <div class=\"muted\" id=\"server-message\"></div>
+        <table class=\"kv-table\">
+          <tbody>
+            <tr><td>Planned Task</td><td id=\"server-planned-task\">-</td></tr>
+            <tr><td>HE Scheme</td><td id=\"server-he-scheme\">-</td></tr>
+            <tr><td>Estimated Depth</td><td id=\"server-depth\">-</td></tr>
+            <tr><td>Input Summary</td><td id=\"server-input-summary\" class=\"server-hidden\">not visible on server</td></tr>
+            <tr><td>Estimated Payload (KB)</td><td id=\"server-estimated-payload\" class=\"server-hidden\">not visible on server</td></tr>
+            <tr><td>Computation Type</td><td id=\"server-computation-type\">-</td></tr>
+            <tr><td>Encrypted Constants</td><td id=\"server-encrypted-constants\">-</td></tr>
+            <tr><td>Server View Formula</td><td id=\"server-display-formula\" class=\"mono-wrap\">-</td></tr>
+            <tr><td>Payload (KB)</td><td id=\"server-payload-kb\">-</td></tr>
+            <tr><td>Hex Preview</td><td id=\"server-hex-preview\" class=\"mono-wrap\">-</td></tr>
+            <tr><td>Server Eval Time (sec)</td><td id=\"server-evaluation-time\">-</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
 
-    <section class=\"card\">
+    <section class=\"card result-card\">
       <div class=\"label\">Result</div>
       <div class=\"value\" id=\"result-title\">No result yet</div>
       <div class=\"muted\" id=\"result-summary\">Waiting for agent decryption...</div>
@@ -326,40 +342,14 @@ def agent_dashboard() -> str:
           <tr><td>Vector Length</td><td id=\"result-vector-length\">-</td></tr>
           <tr><td>Poly Modulus Degree</td><td id=\"result-poly-degree\">-</td></tr>
           <tr><td>Saved JSON</td><td id=\"result-saved-path\" class=\"mono-wrap\">-</td></tr>
-        </tbody>
-      </table>
-    </section>
-  </section>
-
-  <section class=\"grid\">
-    <section class=\"card\">
-      <div class=\"label\">Benchmarks</div>
-      <table class=\"kv-table\">
-        <tbody>
-          <tr><td>Encryption Time</td><td id=\"result-encryption\">-</td></tr>
-          <tr><td>Server Eval Time</td><td id=\"result-evaluation\">-</td></tr>
-          <tr><td>Round-trip Time</td><td id=\"result-roundtrip\">-</td></tr>
-          <tr><td>Decryption Time</td><td id=\"result-decryption\">-</td></tr>
+          <tr><td>Encryption Time (sec)</td><td id=\"result-encryption\">-</td></tr>
+          <tr><td>Server Eval Time (sec)</td><td id=\"result-evaluation\">-</td></tr>
+          <tr><td>Round-trip Time (sec)</td><td id=\"result-roundtrip\">-</td></tr>
+          <tr><td>Decryption Time (sec)</td><td id=\"result-decryption\">-</td></tr>
           <tr><td>Accuracy Check</td><td id=\"result-accuracy\">-</td></tr>
         </tbody>
       </table>
-    </section>
-
-    <section class=\"card\">
-      <div class=\"label\">Local Limits</div>
-      <div id=\"limits\"></div>
-      <div class=\"muted\">Requests that exceed these limits are rejected locally and never sent to the compute service.</div>
-    </section>
-
-    <section class=\"card\">
-      <div class=\"label\">Saved Results</div>
-      <div id=\"saved-results\" class=\"muted\">No saved results yet.</div>
-    </section>
-  </section>
-
-  <section class=\"grid\">
-    <section class=\"card\">
-      <div class=\"label\">Sample Outputs</div>
+      <div class=\"label\" style=\"margin-top:28px;\">Output</div>
       <table>
         <thead><tr><th>Index</th><th>Input</th><th>Expected</th><th>Decrypted</th></tr></thead>
         <tbody id=\"samples-body\"><tr><td colspan=\"4\" class=\"muted\">No samples yet.</td></tr></tbody>
@@ -417,7 +407,7 @@ function setText(id, value) {
 }
 
 function seconds(value) {
-  return value === undefined || value === null ? '-' : `${Number(value).toFixed(4)} sec`;
+  return value === undefined || value === null ? '-' : `${Number(value).toFixed(4)}`;
 }
 
 function renderRunResult(result) {
@@ -497,17 +487,6 @@ function setPipelineStage(agentStage, serverStage) {
   }
 }
 
-function renderSavedResults(saved) {
-  document.getElementById('saved-results').innerHTML = saved.length
-    ? saved.map(r => `
-        <div class="saved-item">
-          <div>${r.name}</div>
-          <div class="muted">${r.size_kb} KB</div>
-        </div>
-      `).join('')
-    : 'No saved results yet.';
-}
-
 function inputProfile(extra) {
   const length = extra?.vector_length;
   const kind = extra?.numeric_kind;
@@ -520,7 +499,7 @@ function inputProfile(extra) {
 
 function payloadEstimate(extra) {
   const payloadKb = extra?.estimated_payload_kb ?? extra?.conservative_payload_kb;
-  return payloadKb === undefined ? '-' : `${payloadKb} KB`;
+  return payloadKb === undefined ? '-' : `${payloadKb}`;
 }
 
 async function refreshStatus() {
@@ -536,7 +515,9 @@ async function refreshStatus() {
 
   setText('agent-stage', agentStage);
   setText('agent-message', agent.message || '');
-  setText('agent-schema-name', agent.extra?.schema_name ?? '-');
+  setText('agent-planned-task', agent.extra?.schema_name ?? '-');
+  setText('agent-he-scheme', agent.extra?.scheme ?? '-');
+  setText('agent-depth', agent.extra?.depth ?? '-');
   setText('agent-input-profile', inputProfile(agent.extra));
   setText('agent-payload-estimate', payloadEstimate(agent.extra));
 
@@ -546,26 +527,22 @@ async function refreshStatus() {
   const hexPreview = rawHexPreview
     ? (rawHexPreview.length > 96 ? `${rawHexPreview.slice(0, 96)}...` : rawHexPreview)
     : '-';
+  const encryptedOperandCount = server.last_request?.encrypted_operand_count;
+  setText('server-planned-task', server.last_request?.schema_name ?? agent.extra?.schema_name ?? '-');
+  setText('server-he-scheme', server.last_request?.scheme ?? agent.extra?.scheme ?? '-');
+  setText('server-depth', server.last_request?.depth ?? agent.extra?.depth ?? '-');
+  setText('server-input-summary', 'not visible on server');
+  setText('server-estimated-payload', 'not visible on server');
+  setText('server-computation-type', server.last_request?.computation_type ?? '-');
+  setText('server-encrypted-constants', encryptedOperandCount === undefined ? '-' : (encryptedOperandCount > 0 ? 'Yes' : 'No'));
+  setText('server-display-formula', server.last_request?.server_display_formula ?? '-');
   setText('server-payload-kb', server.last_request?.payload_kb ?? '-');
   setText('server-hex-preview', hexPreview);
+  setText('server-evaluation-time', seconds(server.last_request?.evaluation_time_sec));
 
   renderRunResult(state.result);
-  renderSavedResults(data.saved_results || []);
 }
 
-async function refreshLimits() {
-  const res = await fetch('/api/limits');
-  const data = await res.json();
-  document.getElementById('limits').innerHTML = `
-    <div class=\"pill\">Max vector: ${data.max_vector_length.toLocaleString()}</div>
-    <div class=\"pill\">Max CKKS depth: ${data.max_ckks_depth}</div>
-    <div class=\"pill\">Max BFV depth: ${data.max_bfv_depth}</div>
-    <div class=\"pill\">Max ops: ${data.max_operation_count}</div>
-    <div class=\"pill\">Payload limit: ${(data.max_estimated_payload_bytes / 1024 / 1024).toFixed(0)} MB</div>
-  `;
-}
-
-refreshLimits();
 refreshStatus();
 setInterval(refreshStatus, 750);
 </script>
@@ -576,12 +553,7 @@ setInterval(refreshStatus, 750);
 
 @app.get("/api/status")
 def status() -> dict[str, Any]:
-    return {"state": read_demo_state(), "saved_results": list_agent_results()}
-
-
-@app.get("/api/limits")
-def limits() -> dict[str, Any]:
-    return agent_limits()
+    return {"state": read_demo_state()}
 
 
 @app.post("/api/run")

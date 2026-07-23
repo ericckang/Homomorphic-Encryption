@@ -46,7 +46,7 @@ def dashboard() -> str:
     }
     h1 { margin: 0 0 8px 0; }
     p { color: #94a3b8; }
-    main { max-width: 1320px; margin: 0 auto; }
+    main { max-width: 1680px; margin: 0 auto; }
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -137,6 +137,9 @@ def dashboard() -> str:
       word-break: break-all;
       white-space: normal;
     }
+    .server-hidden {
+      color: #94a3b8;
+    }
     .pill {
       display: inline-block;
       padding: 4px 10px;
@@ -167,9 +170,11 @@ def dashboard() -> str:
       <div class=\"muted\" id=\"agent-message\"></div>
       <table class=\"kv-table\">
         <tbody>
-          <tr><td>Schema Name</td><td id=\"agent-schema-name\">-</td></tr>
-          <tr><td>Scheme</td><td id=\"agent-scheme\">-</td></tr>
+          <tr><td>Planned Task</td><td id=\"agent-planned-task\">-</td></tr>
+          <tr><td>HE Scheme</td><td id=\"agent-he-scheme\">-</td></tr>
           <tr><td>Estimated Depth</td><td id=\"agent-depth\">-</td></tr>
+          <tr><td>Input Summary</td><td id=\"agent-input-summary\" class=\"server-hidden\">not visible on server</td></tr>
+          <tr><td>Estimated Payload (KB)</td><td id=\"agent-payload-estimate\" class=\"server-hidden\">not visible on server</td></tr>
         </tbody>
       </table>
     </section>
@@ -180,12 +185,17 @@ def dashboard() -> str:
       <div class=\"muted\" id=\"server-message\"></div>
       <table class=\"kv-table\">
         <tbody>
+          <tr><td>Planned Task</td><td id=\"server-planned-task\">-</td></tr>
+          <tr><td>HE Scheme</td><td id=\"server-he-scheme\">-</td></tr>
+          <tr><td>Estimated Depth</td><td id=\"server-depth\">-</td></tr>
+          <tr><td>Input Summary</td><td id=\"server-input-summary\" class=\"server-hidden\">not visible on server</td></tr>
+          <tr><td>Estimated Payload (KB)</td><td id=\"server-estimated-payload\" class=\"server-hidden\">not visible on server</td></tr>
           <tr><td>Computation Type</td><td id=\"server-computation-type\">-</td></tr>
-          <tr><td>Scheme</td><td id=\"server-scheme\">-</td></tr>
           <tr><td>Encrypted Constants</td><td id=\"server-encrypted-constants\">-</td></tr>
           <tr><td>Server View Formula</td><td id=\"server-display-formula\" class=\"mono-wrap\">-</td></tr>
-          <tr><td>Payload Size (KB)</td><td id=\"server-payload-kb\">-</td></tr>
+          <tr><td>Payload (KB)</td><td id=\"server-payload-kb\">-</td></tr>
           <tr><td>Hex Preview</td><td id=\"server-hex-preview\" class=\"mono-wrap\">-</td></tr>
+          <tr><td>Server Eval Time (sec)</td><td id=\"server-evaluation-time\">-</td></tr>
         </tbody>
       </table>
     </section>
@@ -196,10 +206,9 @@ def dashboard() -> str:
       <div class=\"muted\" id=\"privacy-summary\">This untrusted node can audit ciphertext size and evaluate the requested schema, but decrypted values remain on the trusted agent side.</div>
       <table class=\"kv-table\">
         <tbody>
-          <tr><td>Secret Key Present</td><td>No</td></tr>
+          <tr><td>Decryption Key Present</td><td>No</td></tr>
           <tr><td>Decrypted Result Visible Here</td><td>No</td></tr>
-          <tr><td>Trusted Decryption Location</td><td>Agent UI on port 8081</td></tr>
-          <tr><td>Server Eval Time (sec)</td><td id=\"server-evaluation-time\">-</td></tr>
+          <tr><td>Trusted Decryption Location</td><td>Agent on port 8081</td></tr>
         </tbody>
       </table>
     </section>
@@ -274,9 +283,11 @@ def dashboard() -> str:
 
       setText('agent-stage', agentStage);
       setText('agent-message', data.agent?.message || '');
-      setText('agent-schema-name', data.agent?.extra?.schema_name ?? '-');
-      setText('agent-scheme', data.agent?.extra?.scheme ?? '-');
+      setText('agent-planned-task', data.agent?.extra?.schema_name ?? '-');
+      setText('agent-he-scheme', data.agent?.extra?.scheme ?? '-');
       setText('agent-depth', data.agent?.extra?.depth ?? '-');
+      setText('agent-input-summary', 'not visible on server');
+      setText('agent-payload-estimate', 'not visible on server');
 
       setText('server-stage', serverStage);
       setText('server-message', data.server?.message || '');
@@ -285,8 +296,12 @@ def dashboard() -> str:
         ? (rawHexPreview.length > 96 ? `${rawHexPreview.slice(0, 96)}...` : rawHexPreview)
         : '-';
       const encryptedOperandCount = data.server?.last_request?.encrypted_operand_count;
+      setText('server-planned-task', data.server?.last_request?.schema_name ?? data.agent?.extra?.schema_name ?? '-');
+      setText('server-he-scheme', data.server?.last_request?.scheme ?? data.agent?.extra?.scheme ?? '-');
+      setText('server-depth', data.server?.last_request?.depth ?? data.agent?.extra?.depth ?? '-');
+      setText('server-input-summary', 'not visible on server');
+      setText('server-estimated-payload', 'not visible on server');
       setText('server-computation-type', data.server?.last_request?.computation_type ?? '-');
-      setText('server-scheme', data.server?.last_request?.scheme ?? '-');
       setText('server-encrypted-constants', encryptedOperandCount === undefined ? '-' : (encryptedOperandCount > 0 ? 'Yes' : 'No'));
       setText('server-display-formula', formatServerFormula(data.server?.last_request?.server_display_formula));
       setText('server-payload-kb', data.server?.last_request?.payload_kb ?? '-');
