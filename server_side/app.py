@@ -39,13 +39,13 @@ def dashboard() -> str:
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #0b1020;
-      color: #e5e7eb;
+      background: #f5f7fb;
+      color: #17202a;
       margin: 0;
       padding: 24px;
     }
-    h1 { margin: 0 0 8px 0; }
-    p { color: #94a3b8; }
+    h1 { margin: 0 0 8px 0; color: #0f172a; font-size: 32px; letter-spacing: -.02em; }
+    p { color: #64748b; }
     main { max-width: 1680px; margin: 0 auto; }
     .grid {
       display: grid;
@@ -60,9 +60,9 @@ def dashboard() -> str:
       margin: 20px 0 8px 0;
     }
     .pipeline-step {
-      background: #0f172a;
-      border: 1px solid #334155;
-      color: #94a3b8;
+      background: #f8fafc;
+      border: 1px solid #d8e1ec;
+      color: #64748b;
       border-radius: 999px;
       padding: 10px 12px;
       text-align: center;
@@ -75,16 +75,16 @@ def dashboard() -> str:
       color: #ffffff;
     }
     .pipeline-step.done {
-      background: #6a9b86;
-      border-color: #6a9b86;
-      color: #f8fffb;
+      background: #87af9e;
+      border-color: #87af9e;
+      color: #ffffff;
     }
     .card {
-      background: #111827;
-      border: 1px solid #1f2937;
+      background: #ffffff;
+      border: 1px solid #dbe3ee;
       border-radius: 14px;
       padding: 16px;
-      box-shadow: 0 10px 30px rgba(0,0,0,.2);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, .06), 0 2px 6px rgba(15, 23, 42, .04);
       box-sizing: border-box;
       overflow: hidden;
     }
@@ -92,7 +92,7 @@ def dashboard() -> str:
       font-size: 12px;
       text-transform: uppercase;
       letter-spacing: .08em;
-      color: #93c5fd;
+      color: #53789b;
       margin-bottom: 8px;
     }
     .value {
@@ -100,7 +100,7 @@ def dashboard() -> str:
       font-weight: 700;
       margin-bottom: 6px;
     }
-    .muted { color: #94a3b8; font-size: 14px; }
+    .muted { color: #64748b; font-size: 14px; }
     textarea, input {
       width: 100%;
       max-width: 100%;
@@ -110,11 +110,11 @@ def dashboard() -> str:
     pre {
       white-space: pre-wrap;
       word-break: break-word;
-      background: #0f172a;
+      background: #f8fafc;
       padding: 12px;
       border-radius: 10px;
       overflow: auto;
-      color: #cbd5e1;
+      color: #334155;
     }
     table {
       width: 100%;
@@ -123,13 +123,18 @@ def dashboard() -> str:
     }
     th, td {
       padding: 8px;
-      border-bottom: 1px solid #1f2937;
+      border-bottom: 1px solid #dbe3ee;
       text-align: left;
       vertical-align: top;
     }
+    th {
+      background: #f8fafc;
+      color: #334155;
+      font-weight: 700;
+    }
     .kv-table td:first-child {
       width: 42%;
-      color: #93c5fd;
+      color: #53789b;
       font-weight: 600;
     }
     .mono-wrap {
@@ -138,13 +143,13 @@ def dashboard() -> str:
       white-space: normal;
     }
     .server-hidden {
-      color: #94a3b8;
+      color: #6b7280;
     }
     .pill {
       display: inline-block;
       padding: 4px 10px;
       border-radius: 999px;
-      background: #1d4ed8;
+      background: #6c96b6;
       font-size: 12px;
       font-weight: 700;
     }

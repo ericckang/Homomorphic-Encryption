@@ -46,12 +46,12 @@ def agent_dashboard() -> str:
     body {
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #0b1020;
-      color: #e5e7eb;
+      background: #f5f7fb;
+      color: #17202a;
       padding: 24px;
     }
-    h1 { margin: 0 0 8px 0; }
-    p { color: #94a3b8; }
+    h1 { margin: 0 0 8px 0; color: #0f172a; font-size: 32px; letter-spacing: -.02em; }
+    p { color: #64748b; }
     main { max-width: 1680px; margin: 0 auto; }
     .pipeline {
       display: grid;
@@ -60,9 +60,9 @@ def agent_dashboard() -> str:
       margin: 20px 0 16px 0;
     }
     .pipeline-step {
-      background: #0f172a;
-      border: 1px solid #334155;
-      color: #94a3b8;
+      background: #f8fafc;
+      border: 1px solid #d8e1ec;
+      color: #64748b;
       border-radius: 999px;
       padding: 10px 12px;
       text-align: center;
@@ -75,18 +75,19 @@ def agent_dashboard() -> str:
       color: #ffffff;
     }
     .pipeline-step.done {
-      background: #6a9b86;
-      border-color: #6a9b86;
-      color: #f8fffb;
+      background: #87af9e;
+      border-color: #87af9e;
+      color: #ffffff;
     }
     .card {
-      background: #111827;
-      border: 1px solid #1f2937;
+      background: #ffffff;
+      border: 1px solid #dbe3ee;
       border-radius: 14px;
       padding: 16px;
-      box-shadow: 0 10px 30px rgba(0,0,0,.2);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, .06), 0 2px 6px rgba(15, 23, 42, .04);
       box-sizing: border-box;
       overflow: hidden;
+      height: 100%;
     }
     .grid {
       display: grid;
@@ -96,33 +97,45 @@ def agent_dashboard() -> str:
     }
     .status-layout {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 16px;
       margin-top: 16px;
       align-items: stretch;
-    }
-    .status-stack {
-      display: grid;
-      gap: 16px;
-      align-content: start;
     }
     .result-card {
       height: 100%;
     }
     .input-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 16px;
-      align-items: start;
+      align-items: stretch;
     }
     .input-card {
       width: 100%;
+      min-height: 560px;
+    }
+    .output-card {
+      width: 100%;
+      min-height: 560px;
+    }
+    .output-table-wrap {
+      margin-top: 12px;
+      border: 1px solid #d6dde8;
+      border-radius: 12px;
+      background: #f8fafc;
+      overflow: auto;
+      max-height: 390px;
+    }
+    .output-table-wrap table {
+      margin: 0;
+      background: transparent;
     }
     .label {
       font-size: 12px;
       text-transform: uppercase;
       letter-spacing: .08em;
-      color: #93c5fd;
+      color: #53789b;
       margin-bottom: 8px;
     }
     .value {
@@ -130,12 +143,12 @@ def agent_dashboard() -> str:
       font-weight: 700;
       margin-bottom: 6px;
     }
-    .muted { color: #94a3b8; font-size: 14px; }
+    .muted { color: #64748b; font-size: 14px; }
     label {
       display: block;
       font-size: 13px;
       font-weight: 700;
-      color: #cbd5e1;
+      color: #334155;
       margin: 14px 0 6px;
     }
     textarea, input {
@@ -143,11 +156,11 @@ def agent_dashboard() -> str:
       max-width: 100%;
       box-sizing: border-box;
       display: block;
-      border: 1px solid #334155;
+      border: 1px solid #d6dde8;
       border-radius: 10px;
       padding: 12px;
-      background: #0f172a;
-      color: #e5e7eb;
+      background: #f8fafc;
+      color: #17202a;
       font: 15px ui-monospace, SFMono-Regular, Menlo, monospace;
     }
     .file-input-hidden {
@@ -164,53 +177,74 @@ def agent_dashboard() -> str:
       margin-top: 0;
       padding: 10px 16px;
       box-shadow: none;
-      background: #1e293b;
-      border: 1px solid #334155;
+      background: #f8fafc;
+      color: #334155;
+      border: 1px solid #d6dde8;
+      transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+    }
+    .file-upload-button:hover {
+      background: #eef2f7;
+      border-color: #c7d2e0;
     }
     .file-upload-name {
-      color: #cbd5e1;
+      color: #334155;
       font-size: 14px;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       word-break: break-all;
     }
 
-    textarea { min-height: 96px; resize: vertical; }
+    textarea { min-height: 180px; max-height: 180px; resize: none; overflow: auto; }
+    textarea:focus, input:focus {
+      outline: none;
+      border-color: #8fb7e8;
+      box-shadow: 0 0 0 4px rgba(143, 183, 232, .18);
+      background: #ffffff;
+    }
     button {
       margin-top: 16px;
-      background: #1d4ed8;
+      background: #6c96b6;
       color: #ffffff;
-      border: 0;
+      border: 1px solid #7ea3c1;
+      border-bottom-color: #557a98;
       border-radius: 999px;
       padding: 12px 18px;
       font-weight: 800;
       cursor: pointer;
-      box-shadow: 0 10px 22px rgba(29, 78, 216, .24);
+      box-shadow: 0 2px 0 rgba(148, 163, 184, .75), 0 8px 16px rgba(15, 23, 42, .10);
+      transition: transform .15s ease, background-color .15s ease, box-shadow .15s ease, border-color .15s ease;
     }
-    button:disabled { opacity: .55; cursor: not-allowed; }
+    button:hover {
+      background: #7ea5c2;
+      border-color: #8eb2cd;
+      border-bottom-color: #6287a4;
+      transform: translateY(-1px);
+      box-shadow: 0 3px 0 rgba(148, 163, 184, .75), 0 10px 18px rgba(15, 23, 42, .14);
+    }
+    button:disabled { opacity: .55; cursor: not-allowed; transform: none; box-shadow: 0 2px 0 rgba(148, 163, 184, .8), 0 6px 12px rgba(15, 23, 42, .08); }
     .note {
       margin-top: 12px;
       padding: 10px 12px;
       border-radius: 10px;
-      background: #0f172a;
-      color: #cbd5e1;
+      background: #f8fafc;
+      color: #334155;
       font-size: 14px;
     }
     .note.error {
-      border: 1px solid #7f1d1d;
-      color: #fecaca;
+      border: 1px solid #d9a7ae;
+      color: #9f4d5a;
     }
     .note.success {
-      border: 1px solid #14532d;
-      color: #bbf7d0;
+      border: 1px solid #9bc7b0;
+      color: #2f6a50;
     }
     pre {
       white-space: pre-wrap;
       word-break: break-word;
-      background: #0f172a;
+      background: #f8fafc;
       padding: 12px;
       border-radius: 10px;
       overflow: auto;
-      color: #cbd5e1;
+      color: #334155;
     }
     table {
       width: 100%;
@@ -219,13 +253,18 @@ def agent_dashboard() -> str:
     }
     th, td {
       padding: 8px;
-      border-bottom: 1px solid #1f2937;
+      border-bottom: 1px solid #dbe3ee;
       text-align: left;
       vertical-align: top;
     }
+    th {
+      background: transparent;
+      color: #334155;
+      font-weight: 700;
+    }
     .kv-table td:first-child {
       width: 42%;
-      color: #93c5fd;
+      color: #53789b;
       font-weight: 600;
     }
     .mono-wrap {
@@ -234,7 +273,7 @@ def agent_dashboard() -> str:
       white-space: normal;
     }
     .server-hidden {
-      color: #94a3b8;
+      color: #6b7280;
     }
     @media (max-width: 960px) {
       .pipeline {
@@ -242,6 +281,9 @@ def agent_dashboard() -> str:
       }
       .input-card {
         width: 100%;
+      }
+      .input-grid {
+        grid-template-columns: minmax(0, 1fr);
       }
       .status-layout {
         grid-template-columns: minmax(0, 1fr);
@@ -292,46 +334,56 @@ def agent_dashboard() -> str:
 
       <div id=\"run-message\" class=\"note\">Ready for a new encrypted computation.</div>
     </section>
+
+    <section class=\"card output-card\">
+      <div class=\"label\">Output Preview</div>
+      <div class=\"value\">Decrypted sample results</div>
+      <div class=\"muted\">This is the main demo view for comparing plaintext input, expected output, and decrypted output from the trusted agent.</div>
+      <div class=\"output-table-wrap\">
+        <table>
+          <thead><tr><th>Index</th><th>Input</th><th>Expected</th><th>Decrypted</th></tr></thead>
+          <tbody id=\"samples-body\"><tr><td colspan=\"4\" class=\"muted\">No samples yet.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
   </section>
 
   <section class=\"status-layout\">
-    <div class=\"status-stack\">
-      <section class=\"card\">
-        <div class=\"label\">Agent</div>
-        <div class=\"value\" id=\"agent-stage\">Loading...</div>
-        <div class=\"muted\" id=\"agent-message\"></div>
-        <table class=\"kv-table\">
-          <tbody>
-            <tr><td>Planned Task</td><td id=\"agent-planned-task\">-</td></tr>
-            <tr><td>HE Scheme</td><td id=\"agent-he-scheme\">-</td></tr>
-            <tr><td>Estimated Depth</td><td id=\"agent-depth\">-</td></tr>
-            <tr><td>Input Summary</td><td id=\"agent-input-profile\">-</td></tr>
-            <tr><td>Estimated Payload (KB)</td><td id=\"agent-payload-estimate\">-</td></tr>
-          </tbody>
-        </table>
-      </section>
+    <section class=\"card\">
+      <div class=\"label\">Agent</div>
+      <div class=\"value\" id=\"agent-stage\">Loading...</div>
+      <div class=\"muted\" id=\"agent-message\"></div>
+      <table class=\"kv-table\">
+        <tbody>
+          <tr><td>Planned Task</td><td id=\"agent-planned-task\">-</td></tr>
+          <tr><td>HE Scheme</td><td id=\"agent-he-scheme\">-</td></tr>
+          <tr><td>Estimated Depth</td><td id=\"agent-depth\">-</td></tr>
+          <tr><td>Input Summary</td><td id=\"agent-input-profile\">-</td></tr>
+          <tr><td>Estimated Payload (KB)</td><td id=\"agent-payload-estimate\">-</td></tr>
+        </tbody>
+      </table>
+    </section>
 
-      <section class=\"card\">
-        <div class=\"label\">Server</div>
-        <div class=\"value\" id=\"server-stage\">Loading...</div>
-        <div class=\"muted\" id=\"server-message\"></div>
-        <table class=\"kv-table\">
-          <tbody>
-            <tr><td>Planned Task</td><td id=\"server-planned-task\">-</td></tr>
-            <tr><td>HE Scheme</td><td id=\"server-he-scheme\">-</td></tr>
-            <tr><td>Estimated Depth</td><td id=\"server-depth\">-</td></tr>
-            <tr><td>Input Summary</td><td id=\"server-input-summary\" class=\"server-hidden\">not visible on server</td></tr>
-            <tr><td>Estimated Payload (KB)</td><td id=\"server-estimated-payload\" class=\"server-hidden\">not visible on server</td></tr>
-            <tr><td>Computation Type</td><td id=\"server-computation-type\">-</td></tr>
-            <tr><td>Encrypted Constants</td><td id=\"server-encrypted-constants\">-</td></tr>
-            <tr><td>Server View Formula</td><td id=\"server-display-formula\" class=\"mono-wrap\">-</td></tr>
-            <tr><td>Payload (KB)</td><td id=\"server-payload-kb\">-</td></tr>
-            <tr><td>Hex Preview</td><td id=\"server-hex-preview\" class=\"mono-wrap\">-</td></tr>
-            <tr><td>Server Eval Time (sec)</td><td id=\"server-evaluation-time\">-</td></tr>
-          </tbody>
-        </table>
-      </section>
-    </div>
+    <section class=\"card\">
+      <div class=\"label\">Server</div>
+      <div class=\"value\" id=\"server-stage\">Loading...</div>
+      <div class=\"muted\" id=\"server-message\"></div>
+      <table class=\"kv-table\">
+        <tbody>
+          <tr><td>Planned Task</td><td id=\"server-planned-task\">-</td></tr>
+          <tr><td>HE Scheme</td><td id=\"server-he-scheme\">-</td></tr>
+          <tr><td>Estimated Depth</td><td id=\"server-depth\">-</td></tr>
+          <tr><td>Input Summary</td><td id=\"server-input-summary\" class=\"server-hidden\">not visible on server</td></tr>
+          <tr><td>Estimated Payload (KB)</td><td id=\"server-estimated-payload\" class=\"server-hidden\">not visible on server</td></tr>
+          <tr><td>Computation Type</td><td id=\"server-computation-type\">-</td></tr>
+          <tr><td>Encrypted Constants</td><td id=\"server-encrypted-constants\">-</td></tr>
+          <tr><td>Server View Formula</td><td id=\"server-display-formula\" class=\"mono-wrap\">-</td></tr>
+          <tr><td>Payload (KB)</td><td id=\"server-payload-kb\">-</td></tr>
+          <tr><td>Hex Preview</td><td id=\"server-hex-preview\" class=\"mono-wrap\">-</td></tr>
+          <tr><td>Server Eval Time (sec)</td><td id=\"server-evaluation-time\">-</td></tr>
+        </tbody>
+      </table>
+    </section>
 
     <section class=\"card result-card\">
       <div class=\"label\">Result</div>
@@ -348,11 +400,6 @@ def agent_dashboard() -> str:
           <tr><td>Decryption Time (sec)</td><td id=\"result-decryption\">-</td></tr>
           <tr><td>Accuracy Check</td><td id=\"result-accuracy\">-</td></tr>
         </tbody>
-      </table>
-      <div class=\"label\" style=\"margin-top:28px;\">Output</div>
-      <table>
-        <thead><tr><th>Index</th><th>Input</th><th>Expected</th><th>Decrypted</th></tr></thead>
-        <tbody id=\"samples-body\"><tr><td colspan=\"4\" class=\"muted\">No samples yet.</td></tr></tbody>
       </table>
     </section>
   </section>
