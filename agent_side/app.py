@@ -328,7 +328,7 @@ def agent_dashboard() -> str:
         <input id=\"encrypt-formula-constants\" type=\"checkbox\" style=\"width:auto; display:inline-block; margin-right:8px;\" />
         Encrypt eligible formula constants before sending the plan to the server
       </label>
-      <div class=\"muted\">For operations like x+5, x-5, or x*5, the constant can be turned into ciphertext so the server only sees an encrypted operand.</div>
+      <div class=\"muted\">For planner-driven scalar operations and supported multi-column formulas like 2 * salary + 3 * age, numeric constants can be encrypted so the server only sees encrypted operands.</div>
 
       <button id=\"run-button\" onclick=\"runAgent()\">Run Trusted Agent</button>
 
@@ -377,6 +377,8 @@ def agent_dashboard() -> str:
           <tr><td>Estimated Payload (KB)</td><td id=\"server-estimated-payload\" class=\"server-hidden\">not visible on server</td></tr>
           <tr><td>Computation Type</td><td id=\"server-computation-type\">-</td></tr>
           <tr><td>Encrypted Constants</td><td id=\"server-encrypted-constants\">-</td></tr>
+          <tr><td>Formula Path</td><td id=\"server-formula-path\">-</td></tr>
+          <tr><td>Encrypted Inputs</td><td id=\"server-encrypted-inputs\">-</td></tr>
           <tr><td>Server View Formula</td><td id=\"server-display-formula\" class=\"mono-wrap\">-</td></tr>
           <tr><td>Payload (KB)</td><td id=\"server-payload-kb\">-</td></tr>
           <tr><td>Hex Preview</td><td id=\"server-hex-preview\" class=\"mono-wrap\">-</td></tr>
@@ -421,6 +423,17 @@ function updateSelectedFileName() {
 async function runAgent() {
   const button = document.getElementById('run-button');
   const message = document.getElementById('run-message');
+  const prompt = document.getElementById('task-prompt').value.trim();
+  const manualValues = document.getElementById('manual-values').value.trim();
+  const fileInput = document.getElementById('csv-file');
+  if (!prompt) {
+    alert('Please enter a task prompt.');
+    return;
+  }
+  if (!manualValues && !fileInput.files.length && !/\b(?:data|values|input)\s*[:=]\s*\[/.test(prompt)) {
+    alert('Please provide data: upload a CSV file, enter manual values, or include inline data in the prompt.');
+    return;
+  }
   button.disabled = true;
   message.className = 'note';
   message.textContent = 'Running local preflight, planning, encryption, server compute, and local decryption...';
@@ -429,8 +442,8 @@ async function runAgent() {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        task_prompt: document.getElementById('task-prompt').value,
-        manual_values: document.getElementById('manual-values').value,
+        task_prompt: prompt,
+        manual_values: manualValues,
         csv_text: await csvTextFromFile(),
         encrypt_formula_constants: document.getElementById('encrypt-formula-constants').checked,
       }),
@@ -478,7 +491,7 @@ function renderRunResult(result) {
   setText('result-accuracy', accuracy);
   const samples = result.samples || [];
   document.getElementById('samples-body').innerHTML = samples.length
-    ? samples.map(s => `<tr><td>${s.index}</td><td>${s.input}</td><td>${s.expected}</td><td>${s.decrypted}</td></tr>`).join('')
+    ? samples.map(s => `<tr><td>${s.index}</td><td>${typeof s.input === 'object' ? JSON.stringify(s.input) : s.input}</td><td>${s.expected}</td><td>${s.decrypted}</td></tr>`).join('')
     : '<tr><td colspan=\"4\" class=\"muted\">No samples yet.</td></tr>';
 }
 
@@ -575,13 +588,16 @@ async function refreshStatus() {
     ? (rawHexPreview.length > 96 ? `${rawHexPreview.slice(0, 96)}...` : rawHexPreview)
     : '-';
   const encryptedOperandCount = server.last_request?.encrypted_operand_count;
+  const encryptedInputCount = server.last_request?.encrypted_input_count;
   setText('server-planned-task', server.last_request?.schema_name ?? agent.extra?.schema_name ?? '-');
   setText('server-he-scheme', server.last_request?.scheme ?? agent.extra?.scheme ?? '-');
   setText('server-depth', server.last_request?.depth ?? agent.extra?.depth ?? '-');
   setText('server-input-summary', 'not visible on server');
   setText('server-estimated-payload', 'not visible on server');
   setText('server-computation-type', server.last_request?.computation_type ?? '-');
-  setText('server-encrypted-constants', encryptedOperandCount === undefined ? '-' : (encryptedOperandCount > 0 ? 'Yes' : 'No'));
+  setText('server-encrypted-constants', encryptedOperandCount === undefined ? '-' : (encryptedOperandCount > 0 ? `Yes (${encryptedOperandCount})` : 'No'));
+  setText('server-formula-path', server.last_request?.formula_path ?? '-');
+  setText('server-encrypted-inputs', encryptedInputCount === undefined ? '-' : `${encryptedInputCount}`);
   setText('server-display-formula', server.last_request?.server_display_formula ?? '-');
   setText('server-payload-kb', server.last_request?.payload_kb ?? '-');
   setText('server-hex-preview', hexPreview);
@@ -646,6 +662,8 @@ def _resolve_web_input(req: AgentRunRequest) -> tuple[str, str, list[float], dic
     task_prompt = req.task_prompt.strip()
     if not task_prompt:
         raise ValueError("Task prompt is required.")
+    if not (req.manual_values and req.manual_values.strip()) and not (req.csv_text and req.csv_text.strip()) and "[" not in task_prompt:
+        raise ValueError("Please provide data: upload a CSV file, enter manual values, or include inline data in the prompt.")
     return resolve_task_and_data(task_prompt, req.manual_values, req.csv_text)
 
 

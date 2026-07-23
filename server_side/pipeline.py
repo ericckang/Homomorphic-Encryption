@@ -3,9 +3,18 @@ from __future__ import annotations
 import tenseal as ts
 
 from he_common.operations import polynomial_power_depth
+from server_side.expression_eval import evaluate_formula_node, formula_depth
 
 
 def run_pipeline(vector, params: dict, *, integer: bool) -> tuple[object, int]:
+    formula_ast = params.get("formula_ast")
+    encrypted_inputs = params.get("encrypted_inputs") or {}
+    if isinstance(formula_ast, dict):
+        if not encrypted_inputs:
+            raise ValueError("Encrypted formula evaluation requires named encrypted input vectors.")
+        encrypted_operands = _materialize_encrypted_operands_for_formula(vector, params.get("encrypted_operands") or {})
+        return evaluate_formula_node(formula_ast, encrypted_inputs, encrypted_operands), formula_depth(formula_ast)
+
     operations = params.get("operations")
     encrypted_operands = params.get("encrypted_operands") or {}
     if not isinstance(operations, list) or not operations:
@@ -212,6 +221,20 @@ def _load_encrypted_operand_by_key(vector, operand_key: str, encrypted_operands:
     if _is_bfv_vector(vector):
         return ts.bfv_vector_from(vector.context(), bytes(operand_payload))
     return ts.ckks_vector_from(vector.context(), bytes(operand_payload))
+
+
+def _materialize_encrypted_operands_for_formula(vector, encrypted_operands: dict) -> dict[str, object]:
+    materialized: dict[str, object] = {}
+    for operand_key, operand_payload in encrypted_operands.items():
+        if not isinstance(operand_payload, (bytes, bytearray)):
+            continue
+        materialized[operand_key] = _load_encrypted_operand_by_key(
+            vector,
+            operand_key,
+            encrypted_operands,
+            label="formula encrypted constant",
+        )
+    return materialized
 
 
 def _is_bfv_vector(vector) -> bool:

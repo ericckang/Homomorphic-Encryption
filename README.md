@@ -163,11 +163,11 @@ See `data/sample_data.csv` for a ready-to-run example.
 
 ### 2. Multi-column CSV
 
-The first version of multi-column CSV support works like this:
+The current multi-column CSV support works like this:
 - the agent reads the CSV locally,
 - the planner sees only non-sensitive table metadata such as column names and numeric types,
-- your prompt should clearly name **one target numeric column**,
-- the agent extracts that column locally and sends only the encrypted vector for that column to the server.
+- if your prompt names **one target numeric column**, the agent encrypts that column directly,
+- if your prompt gives a simple multi-column numeric formula such as `salary^2 + 5 * age + 6`, the agent now uses a rule-based parser to identify the referenced numeric columns, encrypts each referenced column separately, and sends those ciphertext vectors to the server for encrypted formula evaluation.
 
 A ready-to-run example is included at:
 
@@ -205,11 +205,33 @@ Apply 0.5x^2 + 1.2x + 3 to the risk_score column.
 
 ### Prompt-writing tips
 
-- **Name exactly one numeric column** whenever the CSV has multiple columns.
-- Prefer exact column names such as `salary`, `age`, or `risk_score`.
-- If multiple numeric columns exist and you do not clearly name one, the agent may reject the request as ambiguous.
+- Prefer exact column names such as `salary`, `age`, `height`, `weight`, or `risk_score`.
+- If multiple numeric columns exist and you do not clearly name one, the agent will fall back to a default numeric column.
 - Non-numeric columns such as `department` cannot be encrypted with the current pipeline.
-- This first version supports **one selected column at a time**, not multi-column formulas like `salary + age` or `salary * risk_score`.
+- Simple derived-feature formulas are supported when they use only numeric columns, constants, and `+`, `-`, `*`, `^`.
+- For single-column requests, the agent still encrypts one selected column and runs the normal HE pipeline.
+- For simple multi-column formulas, the agent encrypts each referenced numeric column separately and the server evaluates the formula over ciphertext.
+
+Example:
+
+```text
+compute risk score = height^2 + 5 * weight + 6
+```
+
+This prompt style is also supported:
+
+```text
+prompt: compute risk score for each data, risk score func: height^2 + 5 * weight + 6
+```
+
+With a CSV containing `salary` and `age`, a prompt like `compute risk score = salary^2 + 5 * age + 6` causes the agent to encrypt both `salary` and `age` separately and the server computes the risk score formula directly on ciphertext before returning the encrypted result.
+
+The agent also blocks malformed CSV input locally before any server call, including:
+- missing values in required numeric columns,
+- non-numeric values in numeric columns,
+- blank rows,
+- mismatched row widths,
+- unnamed header columns.
 
 ### Currently supported multi-column CSV requests
 
@@ -219,12 +241,14 @@ These are good fits for the current HE pipeline:
 - element-wise add/subtract/multiply by a public scalar on one numeric column,
 - square of one numeric column,
 - polynomial scoring on one numeric column,
-- public-weight dot product on one numeric column.
+- public-weight dot product on one numeric column,
+- rule-based multi-column encrypted formulas using multiple numeric CSV columns with only constants, `+`, `-`, `*`, and integer powers `^`.
 
-These are **not** supported in this first version:
-- combining two CSV columns in one encrypted computation,
+These are **not** supported in this version:
+- formulas with division, boolean comparisons, conditionals, or function calls,
 - filtering rows such as `department = Sales`,
-- sorting, min/max, median, or arbitrary branching logic.
+- sorting, min/max, median, or arbitrary branching logic,
+- general planner-driven multi-input DAGs beyond the current rule-based CSV formula path.
 
 To use the older terminal-only agent flow instead of the web UI:
 

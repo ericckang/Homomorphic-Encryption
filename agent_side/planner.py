@@ -31,6 +31,66 @@ def get_azure_client() -> AzureOpenAI:
     )
 
 
+def parse_table_intent_with_llm(redacted_task_prompt: str, data_profile: dict[str, Any]) -> dict[str, Any]:
+    """
+    Ask the model to normalize a CSV/table request into either a formula intent or a reduction intent.
+    The result is validated later by deterministic code.
+    """
+    system_prompt = """
+You are a semantic parser for a homomorphic-encryption agent.
+Return ONLY valid JSON. Do not include Markdown.
+
+You never receive raw data values. You only receive the user task text and table metadata.
+
+Return exactly one of these shapes:
+
+For arithmetic formulas over one or more CSV numeric columns:
+{
+  "intent_type": "formula",
+  "formula_expression": "salary * 3 + age",
+  "result_label": "risk_score"
+}
+
+For single-column aggregate/reduction tasks:
+{
+  "intent_type": "reduction",
+  "reduction": "sum" or "mean",
+  "target_column": "salary",
+  "result_label": "salary_mean"
+}
+
+For anything else that should be handled by the generic planner:
+{
+  "intent_type": "planner"
+}
+
+Rules:
+- Use intent_type=formula only for arithmetic expressions over CSV columns and numeric constants.
+- Supported formula operators are +, -, *, and ^ only.
+- Do not use division, comparisons, booleans, function calls, or conditionals in formula_expression.
+- If any variable-like token in the user request is not an exact CSV header name from metadata, do NOT guess or rewrite it; return {"intent_type": "formula", "formula_expression": "<original expression>"} so validation can reject it.
+- Never silently replace an unknown column with another known column.
+- If the user clearly asks for sum or mean of one column, use intent_type=reduction.
+- If uncertain, return {"intent_type": "planner"}.
+- If you output formula_expression, reference CSV columns by exact header names from metadata.
+""".strip()
+
+    user_prompt = {
+        "task_prompt_without_raw_data": redacted_task_prompt,
+        "data_profile": data_profile,
+    }
+    response = get_azure_client().chat.completions.create(
+        model=AZURE_OPENAI_DEPLOYMENT,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(user_prompt)},
+        ],
+        response_format={"type": "json_object"},
+    )
+    content = response.choices[0].message.content or "{}"
+    return json.loads(content)
+
+
 def plan_he_task(redacted_task_prompt: str, data_profile: dict[str, Any]) -> dict[str, Any]:
     """
     Ask the model to map a natural-language request onto the HE operation DSL.

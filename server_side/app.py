@@ -197,6 +197,8 @@ def dashboard() -> str:
           <tr><td>Estimated Payload (KB)</td><td id=\"server-estimated-payload\" class=\"server-hidden\">not visible on server</td></tr>
           <tr><td>Computation Type</td><td id=\"server-computation-type\">-</td></tr>
           <tr><td>Encrypted Constants</td><td id=\"server-encrypted-constants\">-</td></tr>
+          <tr><td>Formula Path</td><td id=\"server-formula-path\">-</td></tr>
+          <tr><td>Encrypted Inputs</td><td id=\"server-encrypted-inputs\">-</td></tr>
           <tr><td>Server View Formula</td><td id=\"server-display-formula\" class=\"mono-wrap\">-</td></tr>
           <tr><td>Payload (KB)</td><td id=\"server-payload-kb\">-</td></tr>
           <tr><td>Hex Preview</td><td id=\"server-hex-preview\" class=\"mono-wrap\">-</td></tr>
@@ -301,13 +303,16 @@ def dashboard() -> str:
         ? (rawHexPreview.length > 96 ? `${rawHexPreview.slice(0, 96)}...` : rawHexPreview)
         : '-';
       const encryptedOperandCount = data.server?.last_request?.encrypted_operand_count;
+      const encryptedInputCount = data.server?.last_request?.encrypted_input_count;
       setText('server-planned-task', data.server?.last_request?.schema_name ?? data.agent?.extra?.schema_name ?? '-');
       setText('server-he-scheme', data.server?.last_request?.scheme ?? data.agent?.extra?.scheme ?? '-');
       setText('server-depth', data.server?.last_request?.depth ?? data.agent?.extra?.depth ?? '-');
       setText('server-input-summary', 'not visible on server');
       setText('server-estimated-payload', 'not visible on server');
       setText('server-computation-type', data.server?.last_request?.computation_type ?? '-');
-      setText('server-encrypted-constants', encryptedOperandCount === undefined ? '-' : (encryptedOperandCount > 0 ? 'Yes' : 'No'));
+      setText('server-encrypted-constants', encryptedOperandCount === undefined ? '-' : (encryptedOperandCount > 0 ? `Yes (${encryptedOperandCount})` : 'No'));
+      setText('server-formula-path', data.server?.last_request?.formula_path ?? '-');
+      setText('server-encrypted-inputs', encryptedInputCount === undefined ? '-' : `${encryptedInputCount}`);
       setText('server-display-formula', formatServerFormula(data.server?.last_request?.server_display_formula));
       setText('server-payload-kb', data.server?.last_request?.payload_kb ?? '-');
       setText('server-hex-preview', hexPreview);
@@ -363,13 +368,16 @@ def compute(req: ComputeRequest) -> ComputeResponse:
 
     payload_path = resolve_in_shared(req.payload_path, must_exist=True)
     encrypted_operand_paths = req.params.get("encrypted_operand_paths") or {}
+    encrypted_input_paths = req.params.get("encrypted_input_paths") or {}
     last_request = {
         "computation_type": req.computation_type,
         "scheme": scheme,
         "schema_name": str(req.params.get("schema_name", req.computation_type)),
         "payload_path": str(payload_path),
         "encrypted_operand_count": len(encrypted_operand_paths) if isinstance(encrypted_operand_paths, dict) else 0,
+        "encrypted_input_count": len(encrypted_input_paths) if isinstance(encrypted_input_paths, dict) else 0,
         "server_display_formula": str(req.params.get("server_display_formula", "-"))[:300],
+        "formula_path": str(req.params.get("formula_path", "planner"))[:80],
     }
     update_server("received", "Server received a compute request.", last_request)
 
@@ -388,6 +396,7 @@ def compute(req: ComputeRequest) -> ComputeResponse:
     last_request["payload_kb"] = audit_meta.get("payload_kb")
     last_request["hex_preview"] = audit_meta.get("hex_preview")
     encrypted_operands = _load_encrypted_operands(encrypted_operand_paths)
+    encrypted_inputs = _load_encrypted_inputs(scheme, context, encrypted_input_paths)
     update_server("audited", "Server audited ciphertext payload and confirmed blind evaluation input.", last_request)
 
     try:
@@ -395,6 +404,7 @@ def compute(req: ComputeRequest) -> ComputeResponse:
         t0 = time.perf_counter()
         operations = req.params.get("operations")
         req.params["encrypted_operands"] = encrypted_operands
+        req.params["encrypted_inputs"] = encrypted_inputs
         result, depth = run_pipeline(vector, req.params, integer=(scheme == "BFV"))
         eval_time = time.perf_counter() - t0
         last_request["evaluation_time_sec"] = round(eval_time, 4)
@@ -443,6 +453,24 @@ def _load_encrypted_operands(operand_paths: dict[str, str]) -> dict[str, bytes]:
         if total_bytes > settings.MAX_PAYLOAD_BYTES:
             raise HTTPException(413, "Combined encrypted operand payloads exceed the configured limit.")
         loaded[key.strip()] = raw
+    return loaded
+
+
+def _load_encrypted_inputs(scheme: str, context, input_paths: dict[str, str]) -> dict[str, object]:
+    if not isinstance(input_paths, dict):
+        raise HTTPException(400, "params.encrypted_input_paths must be an object when provided.")
+    loaded: dict[str, object] = {}
+    total_bytes = 0
+    for key, path_str in input_paths.items():
+        if not isinstance(key, str) or not key.strip():
+            raise HTTPException(400, "Encrypted input keys must be non-empty strings.")
+        if not isinstance(path_str, str) or not path_str.strip():
+            raise HTTPException(400, f"Encrypted input path for key '{key}' must be a non-empty string.")
+        raw = resolve_in_shared(path_str, must_exist=True).read_bytes()
+        total_bytes += len(raw)
+        if total_bytes > settings.MAX_PAYLOAD_BYTES:
+            raise HTTPException(413, "Combined encrypted input payloads exceed the configured limit.")
+        loaded[key.strip()] = _deserialize(scheme, context, raw)
     return loaded
 
 

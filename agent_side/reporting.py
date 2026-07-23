@@ -14,12 +14,22 @@ def print_report(
     timings: dict[str, float],
     poly_mod_degree: int,
     encrypt_formula_constants: bool,
+    *,
+    input_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    sample_inputs = _build_sample_inputs(original_data, plan, input_metadata)
+
     if plan.get("result_shape") == "scalar":
+        scalar_input = sample_inputs[0] if sample_inputs else f"{len(original_data)} encrypted values"
+        if input_metadata and input_metadata.get("input_kind") == "table" and not plan.get("formula_columns"):
+            scalar_input = {
+                "column": plan.get("target_column") or input_metadata.get("selected_column"),
+                "rows": len(original_data),
+            }
         samples = [
             {
                 "index": "scalar",
-                "input": f"{len(original_data)} encrypted values",
+                "input": scalar_input,
                 "expected": expected[0],
                 "decrypted": decrypted[0],
             }
@@ -29,7 +39,7 @@ def print_report(
         samples = [
             {
                 "index": idx,
-                "input": original_data[idx],
+                "input": sample_inputs[idx],
                 "expected": expected[idx],
                 "decrypted": decrypted[idx],
             }
@@ -97,6 +107,28 @@ def print_report(
 
     update_result(result_summary)
     return result_summary
+
+
+def _build_sample_inputs(
+    original_data: list[float],
+    plan: dict[str, Any],
+    input_metadata: dict[str, Any] | None,
+) -> list[Any]:
+    formula_columns = plan.get("formula_columns") or []
+    if not formula_columns or not input_metadata:
+        return list(original_data)
+
+    table_columns = input_metadata.get("table_columns") or {}
+    row_count = min(len(original_data), *(len(table_columns.get(name, [])) for name in formula_columns))
+    samples: list[dict[str, float]] = []
+    for row_index in range(row_count):
+        samples.append(
+            {
+                column_name: float(table_columns[column_name][row_index])
+                for column_name in formula_columns
+            }
+        )
+    return samples
 
 
 def _format_value(value: Any) -> str:
