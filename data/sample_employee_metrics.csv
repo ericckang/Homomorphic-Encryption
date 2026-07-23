@@ -1,0 +1,5 @@
+employee_id,salary,age,risk_score,department
+1001,85000,29,1.05,Sales
+1002,90000,34,1.10,Finance
+1003,95000,41,1.15,Engineering
+1004,99000,38,1.20,Marketing

@@ -25,24 +25,37 @@ def run_agent_task(
     redacted_prompt: str,
     data: list[float],
     *,
+    input_metadata: dict[str, Any] | None = None,
     reset_state: bool = True,
     encrypt_formula_constants: bool = False,
 ) -> dict[str, Any]:
     if reset_state:
         reset_demo_state()
-    update_agent("collecting_input", "Task received from user input.", {"vector_length": len(data)})
+    selected_column = input_metadata.get("selected_column") if input_metadata else None
+    update_agent(
+        "collecting_input",
+        "Task received from user input.",
+        {"vector_length": len(data), "selected_column": selected_column},
+    )
 
     preflight_input_vector(data)
-    profile = data_profile(data)
+    profile = data_profile(data, input_metadata)
     preflight_task_prompt(redacted_prompt)
 
     update_agent(
         "planning",
         "Asking planner for an HE operation schema without raw data.",
-        {"vector_length": len(data), "numeric_kind": profile.get("numeric_kind")},
+        {
+            "vector_length": len(data),
+            "numeric_kind": profile.get("numeric_kind"),
+            "input_kind": profile.get("input_kind"),
+            "selected_column": profile.get("selected_column"),
+        },
     )
     raw_plan = plan_he_task(redacted_prompt, profile)
     plan = sanitize_plan(raw_plan, profile)
+    data = _resolve_plan_input_vector(data, plan, input_metadata)
+    profile = data_profile(data, _with_selected_column(input_metadata, plan.get("target_column")))
     if encrypt_formula_constants:
         plan = _encrypt_plan_constants(plan)
 
@@ -58,6 +71,7 @@ def run_agent_task(
             "estimated_payload_kb": round(preflight.estimated_payload_bytes / 1024, 2),
             "warnings": preflight.warnings,
             "encrypt_formula_constants": encrypt_formula_constants,
+            "selected_column": plan.get("target_column"),
         },
     )
 
@@ -133,6 +147,30 @@ def _encrypt_plan_constants(plan: dict[str, Any]) -> dict[str, Any]:
     ).strip()
     transformed["server_display_formula"] = build_server_display_formula(transformed)
     return transformed
+
+
+def _resolve_plan_input_vector(
+    data: list[float],
+    plan: dict[str, Any],
+    input_metadata: dict[str, Any] | None,
+) -> list[float]:
+    if not input_metadata or input_metadata.get("input_kind") != "table":
+        return data
+    target_column = plan.get("target_column")
+    table_columns = input_metadata.get("table_columns") or {}
+    raw_values = table_columns.get(target_column)
+    if not isinstance(raw_values, list) or not raw_values:
+        raise ValueError(f"Selected CSV column '{target_column}' could not be loaded from the uploaded file.")
+    return [float(value) for value in raw_values]
+
+
+def _with_selected_column(input_metadata: dict[str, Any] | None, selected_column: str | None) -> dict[str, Any] | None:
+    if not input_metadata:
+        return None
+    merged = dict(input_metadata)
+    if selected_column:
+        merged["selected_column"] = selected_column
+    return merged
 
 
 def _build_encrypted_operands(context, plan: dict[str, Any], vector_size: int) -> dict[str, Any]:

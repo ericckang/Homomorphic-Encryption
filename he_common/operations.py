@@ -20,13 +20,25 @@ ALLOWED_OPS = {
 REDUCTION_OPS = {"sum_reduce", "mean_reduce", "dot_product_public"}
 
 
-def data_profile(data: list[float]) -> dict[str, Any]:
+def data_profile(data: list[float], input_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     all_integer = all(float(x).is_integer() for x in data)
-    return {
+    profile = {
         "vector_length": len(data),
         "numeric_kind": "integer" if all_integer else "float",
         "raw_values_shared_with_model": False,
     }
+    if input_metadata and input_metadata.get("input_kind") == "table":
+        profile.update(
+            {
+                "input_kind": "table",
+                "row_count": input_metadata.get("row_count", len(data)),
+                "columns": input_metadata.get("columns", []),
+                "selected_column": input_metadata.get("selected_column"),
+            }
+        )
+    else:
+        profile["input_kind"] = "vector"
+    return profile
 
 
 def sanitize_plan(plan: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
@@ -35,13 +47,16 @@ def sanitize_plan(plan: dict[str, Any], profile: dict[str, Any]) -> dict[str, An
     if not isinstance(requested_operations, list) or not requested_operations:
         raise ValueError("Planner did not return any operations.")
 
-    wants_ckks = profile["numeric_kind"] == "float" or any(
+    target_column = _resolve_target_column(plan, profile)
+    selected_kind = _selected_numeric_kind(profile, target_column)
+
+    wants_ckks = selected_kind == "float" or any(
         operation.get("op") == "mean_reduce" for operation in requested_operations if isinstance(operation, dict)
     )
     if wants_ckks:
         scheme = "CKKS"
     if scheme not in {"BFV", "CKKS"}:
-        scheme = "BFV" if profile["numeric_kind"] == "integer" else "CKKS"
+        scheme = "BFV" if selected_kind == "integer" else "CKKS"
 
     clean_ops = [_sanitize_operation(operation, scheme, profile) for operation in requested_operations]
     _validate_operation_order(clean_ops)
@@ -55,6 +70,7 @@ def sanitize_plan(plan: dict[str, Any], profile: dict[str, Any]) -> dict[str, An
         "result_label": str(plan.get("result_label", "result"))[:80],
         "plaintext_formula": str(plan.get("plaintext_formula", "element-wise HE pipeline"))[:200],
         "notes": str(plan.get("notes", ""))[:300],
+        "target_column": target_column,
     }
     sanitized_plan["server_display_formula"] = build_server_display_formula(sanitized_plan)
     return sanitized_plan
@@ -213,6 +229,35 @@ def _as_positive_int(value: Any, *, field: str) -> int:
     return result
 
 
+def _resolve_target_column(plan: dict[str, Any], profile: dict[str, Any]) -> str | None:
+    if profile.get("input_kind") != "table":
+        return None
+
+    columns = profile.get("columns") or []
+    available = {str(col.get("name")): str(col.get("kind")) for col in columns if isinstance(col, dict)}
+    requested = plan.get("target_column")
+    fallback = profile.get("selected_column")
+    candidate = requested if isinstance(requested, str) and requested.strip() else fallback
+    if not isinstance(candidate, str) or candidate not in available:
+        raise ValueError("Planner must choose a valid numeric CSV column.")
+    if available[candidate] not in {"integer", "float"}:
+        raise ValueError(f"Selected CSV column '{candidate}' is not numeric.")
+    return candidate
+
+
+def _selected_numeric_kind(profile: dict[str, Any], target_column: str | None) -> str:
+    if profile.get("input_kind") != "table":
+        return str(profile["numeric_kind"])
+    columns = profile.get("columns") or []
+    for column in columns:
+        if isinstance(column, dict) and column.get("name") == target_column:
+            kind = str(column.get("kind", ""))
+            if kind in {"integer", "float"}:
+                return kind
+            break
+    raise ValueError(f"Unable to determine numeric kind for selected column '{target_column}'.")
+
+
 def _safe_schema_name(value: Any) -> str:
     name = re.sub(r"[^a-zA-Z0-9_]+", "_", str(value).strip().lower()).strip("_")
     return name[:60] or "general_task"
@@ -235,7 +280,7 @@ def _validate_operation_order(operations: list[dict[str, Any]]) -> None:
 
 
 def build_server_display_formula(plan: dict[str, Any]) -> str:
-    expression = "x"
+    expression = str(plan.get("target_column") or "x")
     for operation in plan.get("operations", []):
         op = operation.get("op")
         if op == "add_scalar":
@@ -253,7 +298,7 @@ def build_server_display_formula(plan: dict[str, Any]) -> str:
         elif op == "square":
             expression = f"({expression})^2"
         elif op == "polynomial":
-            expression = _polynomial_display_formula(operation)
+            expression = _polynomial_display_formula(operation, expression)
         elif op == "sum_reduce":
             expression = f"sum({expression})"
         elif op == "mean_reduce":
@@ -263,15 +308,15 @@ def build_server_display_formula(plan: dict[str, Any]) -> str:
     return expression
 
 
-def _polynomial_display_formula(operation: dict[str, Any]) -> str:
+def _polynomial_display_formula(operation: dict[str, Any], variable: str = "x") -> str:
     parts: list[str] = []
     for term in operation.get("terms", []):
         coefficient = term["coefficient"]
         power = term["power"]
         if power == 1:
-            parts.append(f"{coefficient}*x")
+            parts.append(f"{coefficient}*{variable}")
         else:
-            parts.append(f"{coefficient}*x^{power}")
+            parts.append(f"{coefficient}*{variable}^{power}")
     constant = operation.get("constant", 0)
     if constant:
         parts.append(str(constant))

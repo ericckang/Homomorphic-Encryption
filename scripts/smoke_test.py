@@ -8,6 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent_side.crypto import decrypt_vector, encrypt_vector, make_context
+from agent_side.input_data import load_csv_table
 from agent_side.preflight import preflight_plan
 from agent_side.transport import post_compute
 from he_common.config import SERVER_URL
@@ -140,6 +141,42 @@ def run_ckks_dot_test() -> None:
     print(f"CKKS dot-product smoke test passed: error={error:.8f}")
 
 
+def run_csv_column_mean_test() -> None:
+    csv_info = load_csv_table(str(PROJECT_ROOT / "data" / "sample_employee_metrics.csv"))
+    data = csv_info["table_columns"]["salary"]
+    numeric_data = [float(value) for value in data]
+    profile = data_profile(
+        numeric_data,
+        {
+            "input_kind": "table",
+            "row_count": csv_info["row_count"],
+            "columns": csv_info["columns"],
+            "selected_column": csv_info["selected_column"],
+        },
+    )
+    plan = sanitize_plan(
+        {
+            "schema_name": "salary_mean_from_csv",
+            "target_column": "salary",
+            "scheme": "CKKS",
+            "operations": [{"op": "mean_reduce"}],
+            "result_label": "salary mean",
+            "plaintext_formula": "mean(salary)",
+        },
+        profile,
+    )
+
+    if plan.get("target_column") != "salary":
+        raise AssertionError(f"CSV target_column mismatch: {plan.get('target_column')}")
+
+    decrypted, expected = _run_plan(numeric_data, plan)
+    error = abs(expected[0] - decrypted[0])
+    if error > 1e-2:
+        raise AssertionError(f"CSV salary mean error too large: {error}")
+
+    print(f"CSV column smoke test passed: selected=salary mean_error={error:.8f}")
+
+
 def _run_plan(data: list[float], plan: dict) -> tuple[list[float], list[float]]:
     preflight_plan(plan, len(data))
     context, _ = make_context(plan["scheme"], len(data), estimate_depth(plan["operations"]))
@@ -161,6 +198,7 @@ def main() -> None:
     run_ckks_test()
     run_ckks_mean_test()
     run_ckks_dot_test()
+    run_csv_column_mean_test()
     print("All smoke tests passed.")
 
 

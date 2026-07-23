@@ -39,6 +39,7 @@ def print_report(
     result_summary = {
         "schema_name": plan["schema_name"],
         "scheme": plan["scheme"],
+        "selected_column": plan.get("target_column"),
         "computation_type": plan["computation_type"],
         "result_shape": plan.get("result_shape", "vector"),
         "formula": plan["plaintext_formula"],
@@ -62,6 +63,8 @@ def print_report(
     print(f"Schema             : {plan['schema_name']}")
     print(f"Scheme             : {plan['scheme']} ({plan['computation_type']})")
     print(f"Formula            : {plan['plaintext_formula']}")
+    if plan.get("target_column"):
+        print(f"Selected column    : {plan['target_column']}")
     if plan["notes"]:
         print(f"Planner notes      : {plan['notes']}")
     print(f"Vector length      : {len(original_data)}")

@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import ast
-import csv
 import os
-from io import StringIO
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from agent_side.input_data import coerce_numeric_vector, extract_inline_data
+from agent_side.input_data import resolve_task_and_data
 from agent_side.preflight import agent_limits, estimate_payload_bytes, preflight_input_vector
 from agent_side.result_store import list_agent_results
 from agent_side.runner import run_agent_task
@@ -591,9 +588,9 @@ def limits() -> dict[str, Any]:
 def run_task(req: AgentRunRequest) -> dict[str, Any]:
     try:
         reset_demo_state()
-        _, redacted_prompt, data = _resolve_web_input(req)
+        _, redacted_prompt, data, input_metadata = _resolve_web_input(req)
         preflight_input_vector(data)
-        profile = data_profile(data)
+        profile = data_profile(data, input_metadata)
         conservative_payload = estimate_payload_bytes("CKKS", len(data))
         update_agent(
             "preflight",
@@ -602,11 +599,14 @@ def run_task(req: AgentRunRequest) -> dict[str, Any]:
                 "vector_length": len(data),
                 "numeric_kind": profile["numeric_kind"],
                 "conservative_payload_kb": round(conservative_payload / 1024, 2),
+                "input_kind": profile.get("input_kind"),
+                "selected_column": profile.get("selected_column"),
             },
         )
         result = run_agent_task(
             redacted_prompt,
             data,
+            input_metadata=input_metadata,
             reset_state=False,
             encrypt_formula_constants=req.encrypt_formula_constants,
         )
@@ -623,37 +623,11 @@ def run_task(req: AgentRunRequest) -> dict[str, Any]:
         raise HTTPException(500, str(exc))
 
 
-def _resolve_web_input(req: AgentRunRequest) -> tuple[str, str, list[float]]:
+def _resolve_web_input(req: AgentRunRequest) -> tuple[str, str, list[float], dict[str, Any]]:
     task_prompt = req.task_prompt.strip()
     if not task_prompt:
         raise ValueError("Task prompt is required.")
-
-    data, redacted_prompt = extract_inline_data(task_prompt)
-    if data is not None:
-        return task_prompt, redacted_prompt, data
-
-    if req.manual_values and req.manual_values.strip():
-        values = coerce_numeric_vector(ast.literal_eval(req.manual_values.strip()))
-        return task_prompt, task_prompt, values
-
-    if req.csv_text and req.csv_text.strip():
-        values = _load_csv_text(req.csv_text)
-        return task_prompt, task_prompt, values
-
-    raise ValueError("Provide data inline, manual values, or a CSV file.")
-
-
-def _load_csv_text(csv_text: str) -> list[float]:
-    rows = [row for row in csv.reader(StringIO(csv_text)) if row]
-    if not rows:
-        raise ValueError("CSV file is empty.")
-    first_row = [cell.strip().lower() for cell in rows[0]]
-    if "value" in first_row:
-        value_idx = first_row.index("value")
-        raw_values = [row[value_idx] for row in rows[1:] if len(row) > value_idx]
-    else:
-        raw_values = [row[0] for row in rows]
-    return coerce_numeric_vector(raw_values)
+    return resolve_task_and_data(task_prompt, req.manual_values, req.csv_text)
 
 
 def run() -> None:

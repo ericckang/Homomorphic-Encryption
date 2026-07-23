@@ -146,7 +146,11 @@ The dashboards are designed to make the privacy boundary visible: the server onl
 sees ciphertext bytes and cannot decrypt them; readable numbers appear only after
 the agent decrypts the returned result.
 
-CSV format is one numeric vector in a `value` column:
+CSV input can be used in two ways.
+
+### 1. Single-column CSV
+
+A one-column numeric vector in a `value` column still works:
 
 ```csv
 value
@@ -156,6 +160,71 @@ value
 ```
 
 See `data/sample_data.csv` for a ready-to-run example.
+
+### 2. Multi-column CSV
+
+The first version of multi-column CSV support works like this:
+- the agent reads the CSV locally,
+- the planner sees only non-sensitive table metadata such as column names and numeric types,
+- your prompt should clearly name **one target numeric column**,
+- the agent extracts that column locally and sends only the encrypted vector for that column to the server.
+
+A ready-to-run example is included at:
+
+```text
+data/sample_employee_metrics.csv
+```
+
+Example file:
+
+```csv
+employee_id,salary,age,risk_score,department
+1001,85000,29,1.05,Sales
+1002,90000,34,1.10,Finance
+1003,95000,41,1.15,Engineering
+1004,99000,38,1.20,Marketing
+```
+
+### How to write prompts for multi-column CSVs
+
+Be explicit about the column name. Good prompt patterns are:
+
+```text
+Compute the mean of the salary column in this CSV.
+```
+
+```text
+Sum all values in the age column.
+```
+
+
+```text
+Apply 0.5x^2 + 1.2x + 3 to the risk_score column.
+```
+
+
+### Prompt-writing tips
+
+- **Name exactly one numeric column** whenever the CSV has multiple columns.
+- Prefer exact column names such as `salary`, `age`, or `risk_score`.
+- If multiple numeric columns exist and you do not clearly name one, the agent may reject the request as ambiguous.
+- Non-numeric columns such as `department` cannot be encrypted with the current pipeline.
+- This first version supports **one selected column at a time**, not multi-column formulas like `salary + age` or `salary * risk_score`.
+
+### Currently supported multi-column CSV requests
+
+These are good fits for the current HE pipeline:
+- mean/average of one numeric column,
+- sum of one numeric column,
+- element-wise add/subtract/multiply by a public scalar on one numeric column,
+- square of one numeric column,
+- polynomial scoring on one numeric column,
+- public-weight dot product on one numeric column.
+
+These are **not** supported in this first version:
+- combining two CSV columns in one encrypted computation,
+- filtering rows such as `department = Sales`,
+- sorting, min/max, median, or arbitrary branching logic.
 
 To use the older terminal-only agent flow instead of the web UI:
 

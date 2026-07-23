@@ -14,9 +14,9 @@ def main() -> None:
     print("The LLM plans the operation schema. Raw data stays local and encrypted.")
 
     try:
-        _, redacted_prompt, data = collect_task_and_data()
+        _, redacted_prompt, data, input_metadata = collect_task_and_data()
         print("\n[Agent] Asking planner for an HE operation schema without raw data...")
-        run_agent_task(redacted_prompt, data)
+        run_agent_task(redacted_prompt, data, input_metadata=input_metadata)
     except requests.ConnectionError:
         print(f"\n[Agent] Could not reach server at {SERVER_URL}. Start it with: python server.py")
     except Exception as exc:

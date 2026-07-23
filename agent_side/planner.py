@@ -46,6 +46,7 @@ Important privacy rule:
 Your output schema:
 {
   "schema_name": "short_snake_case_name",
+  "target_column": "column_name_if_input_is_table_or_null",
   "scheme": "BFV" or "CKKS",
   "computation_type": "general_bfv" or "general_ckks",
   "operations": [
@@ -68,6 +69,9 @@ Your output schema:
 }
 
 Rules:
+- If the input metadata describes a table/CSV, you must choose exactly one numeric target_column from the provided columns.
+- Never choose a string/non-numeric column.
+- If the input metadata is a single vector instead of a table, set target_column to null or omit it.
 - Choose BFV only for exact integer arithmetic using add/subtract/multiply by scalar.
 - Choose CKKS for floating point values, weighted/risk scores, averages, or polynomial scoring.
 - This HE skill supports both vector->vector pipelines and a single final vector->scalar reduction.
