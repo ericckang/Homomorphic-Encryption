@@ -139,11 +139,26 @@ def _encrypt_plan_constants(plan: dict[str, Any]) -> dict[str, Any]:
             transformed_op["operand_key"] = f"enc_const_{operand_index}"
             transformed_ops.append(transformed_op)
             operand_index += 1
-        else:
-            transformed_ops.append(dict(operation))
+            continue
+
+        if op == "polynomial":
+            transformed_op = dict(operation)
+            transformed_terms: list[dict[str, Any]] = []
+            for term in operation.get("terms", []):
+                transformed_term = dict(term)
+                transformed_term["operand_key"] = f"enc_const_{operand_index}"
+                transformed_terms.append(transformed_term)
+                operand_index += 1
+            transformed_op["terms"] = transformed_terms
+            transformed_op["constant_operand_key"] = f"enc_const_{operand_index}"
+            operand_index += 1
+            transformed_ops.append(transformed_op)
+            continue
+
+        transformed_ops.append(dict(operation))
     transformed["operations"] = transformed_ops
     transformed["notes"] = (
-        f"{plan['notes']} Constants in eligible scalar operations were encrypted before server evaluation."
+        f"{plan['notes']} Constants in eligible scalar operations and polynomial terms were encrypted before server evaluation."
     ).strip()
     transformed["server_display_formula"] = build_server_display_formula(transformed)
     return transformed
@@ -177,7 +192,25 @@ def _build_encrypted_operands(context, plan: dict[str, Any], vector_size: int) -
     operands: dict[str, Any] = {}
     for operation in plan["operations"]:
         operand_key = operation.get("operand_key")
-        if not operand_key:
-            continue
-        operands[operand_key] = encrypt_scalar_operand(context, plan["scheme"], operation["value"], vector_size)
+        if operand_key:
+            operands[operand_key] = encrypt_scalar_operand(context, plan["scheme"], operation["value"], vector_size)
+
+        if operation.get("op") == "polynomial":
+            for term in operation.get("terms", []):
+                term_operand_key = term.get("operand_key")
+                if term_operand_key:
+                    operands[term_operand_key] = encrypt_scalar_operand(
+                        context,
+                        plan["scheme"],
+                        term["coefficient"],
+                        vector_size,
+                    )
+            constant_operand_key = operation.get("constant_operand_key")
+            if constant_operand_key:
+                operands[constant_operand_key] = encrypt_scalar_operand(
+                    context,
+                    plan["scheme"],
+                    operation.get("constant", 0),
+                    vector_size,
+                )
     return operands

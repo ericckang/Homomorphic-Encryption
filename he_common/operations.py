@@ -51,7 +51,9 @@ def sanitize_plan(plan: dict[str, Any], profile: dict[str, Any]) -> dict[str, An
     selected_kind = _selected_numeric_kind(profile, target_column)
 
     wants_ckks = selected_kind == "float" or any(
-        operation.get("op") == "mean_reduce" for operation in requested_operations if isinstance(operation, dict)
+        operation.get("op") in {"mean_reduce", "square", "polynomial"}
+        for operation in requested_operations
+        if isinstance(operation, dict)
     )
     if wants_ckks:
         scheme = "CKKS"
@@ -188,10 +190,22 @@ def _sanitize_operation(operation: Any, scheme: str, profile: dict[str, Any]) ->
     for term in terms:
         power = _as_positive_int(term.get("power"), field="polynomial power")
         coefficient = _as_number(term.get("coefficient", 1), integer=(scheme == "BFV"))
-        clean_terms.append({"power": power, "coefficient": coefficient})
+        clean_term = {"power": power, "coefficient": coefficient}
+        operand_key = term.get("operand_key")
+        if operand_key is not None:
+            if not isinstance(operand_key, str) or not operand_key.strip():
+                raise ValueError("Polynomial term operand_key must be a non-empty string.")
+            clean_term["operand_key"] = operand_key.strip()
+        clean_terms.append(clean_term)
 
     constant = _as_number(operation.get("constant", 0), integer=(scheme == "BFV"))
-    return {"op": "polynomial", "terms": clean_terms, "constant": constant}
+    clean_operation = {"op": "polynomial", "terms": clean_terms, "constant": constant}
+    constant_operand_key = operation.get("constant_operand_key")
+    if constant_operand_key is not None:
+        if not isinstance(constant_operand_key, str) or not constant_operand_key.strip():
+            raise ValueError("Polynomial constant_operand_key must be a non-empty string.")
+        clean_operation["constant_operand_key"] = constant_operand_key.strip()
+    return clean_operation
 
 
 def _as_number(value: Any, *, integer: bool) -> int | float:
@@ -311,13 +325,13 @@ def build_server_display_formula(plan: dict[str, Any]) -> str:
 def _polynomial_display_formula(operation: dict[str, Any], variable: str = "x") -> str:
     parts: list[str] = []
     for term in operation.get("terms", []):
-        coefficient = term["coefficient"]
+        coefficient = "⟦c⟧" if term.get("operand_key") else term["coefficient"]
         power = term["power"]
         if power == 1:
             parts.append(f"{coefficient}*{variable}")
         else:
             parts.append(f"{coefficient}*{variable}^{power}")
-    constant = operation.get("constant", 0)
+    constant = "⟦c⟧" if operation.get("constant_operand_key") else operation.get("constant", 0)
     if constant:
         parts.append(str(constant))
     return " + ".join(parts) if parts else "0"

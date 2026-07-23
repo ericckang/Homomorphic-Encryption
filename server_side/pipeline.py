@@ -19,7 +19,7 @@ def run_pipeline(vector, params: dict, *, integer: bool) -> tuple[object, int]:
             raise ValueError("Each operation must be an object.")
         op = operation.get("op")
         if op == "polynomial":
-            vector = _apply_polynomial(vector, operation, integer=integer)
+            vector = _apply_polynomial(vector, operation, encrypted_operands, integer=integer)
             term_powers = [int(term.get("power")) for term in operation.get("terms", [])]
             max_depth += max(polynomial_power_depth(power) for power in term_powers)
         elif op == "sum_reduce":
@@ -57,7 +57,7 @@ def _apply_basic_op(vector, operation: dict, encrypted_operands: dict, *, intege
     if op == "mul_encrypted_scalar":
         return vector * _load_encrypted_operand(vector, operation, encrypted_operands, integer=integer)
     if op == "square":
-        return vector.square()
+        return _square_vector(vector)
 
     raise ValueError(f"Unsupported pipeline operation: {op}")
 
@@ -104,7 +104,7 @@ def _clone_vector(vector):
     raise ValueError("The current TenSEAL backend does not expose a safe vector copy helper.")
 
 
-def _apply_polynomial(vector, operation: dict, *, integer: bool):
+def _apply_polynomial(vector, operation: dict, encrypted_operands: dict, *, integer: bool):
     terms = operation.get("terms")
     if not isinstance(terms, list) or not terms:
         raise ValueError("polynomial operation requires a non-empty terms list.")
@@ -114,18 +114,37 @@ def _apply_polynomial(vector, operation: dict, *, integer: bool):
     result = None
     for idx, term in enumerate(terms, start=1):
         power = _require_positive_int(term.get("power"), f"term {idx} power")
-        coefficient = _require_number(
-            term.get("coefficient", 1),
-            f"term {idx} coefficient",
-            integer=integer,
-        )
-        contribution = _power_vector(vector, power, powers) * coefficient
+        power_vector = _power_vector(vector, power, powers)
+        operand_key = term.get("operand_key")
+        if operand_key:
+            contribution = power_vector * _load_encrypted_operand_by_key(
+                vector,
+                operand_key,
+                encrypted_operands,
+                label=f"polynomial term {idx}",
+            )
+        else:
+            coefficient = _require_number(
+                term.get("coefficient", 1),
+                f"term {idx} coefficient",
+                integer=integer,
+            )
+            contribution = power_vector * coefficient
         result = contribution if result is None else result + contribution
 
-    constant = operation.get("constant", 0)
-    if constant:
-        value = _require_number(constant, "polynomial constant", integer=integer)
-        result = result + _scalar_vector(vector, value)
+    constant_operand_key = operation.get("constant_operand_key")
+    if constant_operand_key:
+        result = result + _load_encrypted_operand_by_key(
+            vector,
+            constant_operand_key,
+            encrypted_operands,
+            label="polynomial constant",
+        )
+    else:
+        constant = operation.get("constant", 0)
+        if constant:
+            value = _require_number(constant, "polynomial constant", integer=integer)
+            result = result + _scalar_vector(vector, value)
 
     return result
 
@@ -155,13 +174,19 @@ def _power_vector(vector, exponent: int, cache: dict[int, object]):
 
     if exponent % 2 == 0:
         half = _power_vector(vector, exponent // 2, cache)
-        cache[exponent] = half.square()
+        cache[exponent] = _square_vector(half)
         return cache[exponent]
 
     lower = exponent // 2
     upper = exponent - lower
     cache[exponent] = _power_vector(vector, lower, cache) * _power_vector(vector, upper, cache)
     return cache[exponent]
+
+
+def _square_vector(vector):
+    if hasattr(vector, "square"):
+        return vector.square()
+    return vector * vector
 
 
 def _scalar_vector(vector, value):
@@ -172,9 +197,18 @@ def _load_encrypted_operand(vector, operation: dict, encrypted_operands: dict, *
     operand_key = operation.get("operand_key")
     if not isinstance(operand_key, str) or not operand_key:
         raise ValueError(f"{operation.get('op')} requires a valid operand_key.")
+    return _load_encrypted_operand_by_key(
+        vector,
+        operand_key,
+        encrypted_operands,
+        label=str(operation.get("op", "operation")),
+    )
+
+
+def _load_encrypted_operand_by_key(vector, operand_key: str, encrypted_operands: dict, *, label: str):
     operand_payload = encrypted_operands.get(operand_key)
     if not isinstance(operand_payload, (bytes, bytearray)):
-        raise ValueError(f"Missing encrypted operand bytes for key '{operand_key}'.")
+        raise ValueError(f"Missing encrypted operand bytes for key '{operand_key}' in {label}.")
     if _is_bfv_vector(vector):
         return ts.bfv_vector_from(vector.context(), bytes(operand_payload))
     return ts.ckks_vector_from(vector.context(), bytes(operand_payload))
