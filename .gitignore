@@ -22,3 +22,6 @@ agent_results/
 # Benchmarks
 benchmark_results/
 benchmark_outputs/
+
+# Large local benchmark fixtures
+data/too_large.csv
