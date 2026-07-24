@@ -216,6 +216,10 @@ Expected frontend behavior:
 Please provide data: upload a CSV file, enter manual values, or include inline data in the prompt.
 ```
 
+Note:
+- if the prompt already includes inline data such as `data=[22, 30, 4, 5, 1]`, no missing-data alert should appear
+- the same should apply when the agent UI manual data field contains values
+
 ## 6. Malformed CSV tests
 
 These should also be rejected before server compute.

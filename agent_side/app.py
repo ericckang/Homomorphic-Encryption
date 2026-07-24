@@ -408,6 +408,8 @@ def agent_dashboard() -> str:
 </main>
 
 <script>
+const INLINE_DATA_PATTERN = /\b(?:data|values|input)\s*[:=]\s*\[[^\]]*\]/i;
+
 async function csvTextFromFile() {
   const fileInput = document.getElementById('csv-file');
   if (!fileInput.files.length) return null;
@@ -430,9 +432,12 @@ async function runAgent() {
     alert('Please enter a task prompt.');
     return;
   }
-  if (!manualValues && !fileInput.files.length && !/\b(?:data|values|input)\s*[:=]\s*\[/.test(prompt)) {
-    alert('Please provide data: upload a CSV file, enter manual values, or include inline data in the prompt.');
-    return;
+  if (!manualValues && !fileInput.files.length) {
+    const hasInlineData = prompt.includes('[') && prompt.includes(']');
+    if (!hasInlineData) {
+      alert('Please provide data: upload a CSV file, enter manual values, or include inline data in the prompt.');
+      return;
+    }
   }
   button.disabled = true;
   message.className = 'note';
@@ -658,11 +663,15 @@ def run_task(req: AgentRunRequest) -> dict[str, Any]:
         raise HTTPException(500, str(exc))
 
 
+def _has_inline_data(task_prompt: str) -> bool:
+    return "[" in task_prompt and "]" in task_prompt and task_prompt.find("[") < task_prompt.rfind("]")
+
+
 def _resolve_web_input(req: AgentRunRequest) -> tuple[str, str, list[float], dict[str, Any]]:
     task_prompt = req.task_prompt.strip()
     if not task_prompt:
         raise ValueError("Task prompt is required.")
-    if not (req.manual_values and req.manual_values.strip()) and not (req.csv_text and req.csv_text.strip()) and "[" not in task_prompt:
+    if not (req.manual_values and req.manual_values.strip()) and not (req.csv_text and req.csv_text.strip()) and not _has_inline_data(task_prompt):
         raise ValueError("Please provide data: upload a CSV file, enter manual values, or include inline data in the prompt.")
     return resolve_task_and_data(task_prompt, req.manual_values, req.csv_text)
 
